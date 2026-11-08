@@ -18,13 +18,27 @@ import type { Enhancement, TenantView } from "./types.ts";
  */
 export type MarkdownRecord = Omit<Enhancement, "ai_fields"> & { ai_fields: string | string[] };
 
-const SERVERLESS = Boolean(process.env.VERCEL) || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+/** Lazy (not module-level) so tests and env overrides can flip it per call. */
+function serverless(): boolean {
+  return Boolean(process.env.VERCEL) || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
+
+/**
+ * Write a document only when it does not exist yet.
+ *
+ * Seeding is meant to be idempotent: rewriting an existing Markdown file churns its
+ * `submitted_on`/`updated_at` and dirties the working tree on every `db:seed`.
+ */
+function writeIfAbsent(absolute: string, content: string): number | null {
+  if (existsSync(absolute)) return null;
+  return writeAt(absolute, content);
+}
 
 /** Root of the vault tree; ENHANCEMENT_VAULT_DIR overrides for tests/deployments. */
 export function vaultRoot(): string {
   const explicit = process.env.ENHANCEMENT_VAULT_DIR?.trim();
   if (explicit) return isAbsolute(explicit) ? explicit : resolve(process.cwd(), explicit);
-  if (SERVERLESS) return "/tmp/enhancements/vault";
+  if (serverless()) return "/tmp/enhancements/vault";
   return join(resolve(process.cwd()), "vault");
 }
 
@@ -158,6 +172,7 @@ function safeArray(value: string | string[] | null | undefined): string[] {
   }
 }
 
+/** `bytes` is 0 when the seed skipped an existing file. */
 export type VaultWrite = { path: string; absolute: string; bytes: number };
 
 function writeAt(absolute: string, markdown: string): number {
@@ -172,6 +187,14 @@ export function writeVaultFile(enhancement: MarkdownRecord, tenant: TenantView):
   const location = vaultLocation(enhancement, tenant.slug, archived);
   const markdown = buildEnhancementMarkdown(enhancement, tenant);
   const bytes = writeAt(location.absolute, markdown);
+  return { ...location, bytes };
+}
+
+/** Seed-only variant: never clobbers a document that already exists on disk. */
+export function writeVaultFileIfAbsent(enhancement: MarkdownRecord, tenant: TenantView): VaultWrite {
+  const archived = enhancement.status === "Archived";
+  const location = vaultLocation(enhancement, tenant.slug, archived);
+  const bytes = writeIfAbsent(location.absolute, buildEnhancementMarkdown(enhancement, tenant)) ?? 0;
   return { ...location, bytes };
 }
 

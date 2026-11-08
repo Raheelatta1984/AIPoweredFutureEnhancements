@@ -1,10 +1,6 @@
 import type { Metadata } from "next";
 
-import { ensureBootSync } from "../lib/boot.ts";
 import "./globals.css";
-
-// Reconcile repo-side handover documents once per server process.
-ensureBootSync();
 
 export const metadata: Metadata = {
   title: "Future Enhancements Hub",

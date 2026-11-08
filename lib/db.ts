@@ -19,10 +19,15 @@ export type SqlValue = string | number | bigint | null;
 
 export type Row = Record<string, SqlValue>;
 
-const SERVERLESS =
-  Boolean(process.env.VERCEL) ||
-  Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME) ||
-  Boolean(process.env.NETLIFY);
+/** Lazy (not module-level) so tests and env overrides can flip it per call. */
+function serverless(): boolean {
+  return (
+    Boolean(process.env.VERCEL) ||
+    Boolean(process.env.VERCEL_ENV) ||
+    Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME) ||
+    Boolean(process.env.NETLIFY)
+  );
+}
 
 export function repoRoot(): string {
   // lib/ -> repo root. `process.cwd()` is the repo root in dev and in `next start`.
@@ -36,7 +41,7 @@ export function databaseFile(): string {
   const explicit = process.env.DATABASE_FILE?.trim();
   if (explicit) return resolve(explicit);
   const root = repoRoot();
-  if (SERVERLESS) {
+  if (serverless()) {
     ephemeral = true;
     return join("/tmp", "enhancements", "enhancements.db");
   }

@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { hashPassword } from "../lib/auth.ts";
 import { count, get, migrate, run, setSetting } from "../lib/db.ts";
 import { seedDemoDataEnabled, DEMO_PASSWORD } from "../lib/flags.ts";
-import { writeHandoverMirror } from "../lib/handovers.ts";
+import { writeHandoverMirrorIfAbsent } from "../lib/handovers.ts";
 import {
   SEED_PEOPLE,
   SEED_PROPOSALS,
@@ -18,7 +18,7 @@ import {
 import { formatRef } from "../lib/rules.ts";
 import { getTenantBySlug } from "../lib/tenants.ts";
 import type { Enhancement, TenantView } from "../lib/types.ts";
-import { writeVaultFile } from "../lib/vault.ts";
+import { writeVaultFileIfAbsent } from "../lib/vault.ts";
 
 function iso(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 86400000).toISOString();
@@ -154,14 +154,14 @@ function insertProposals(tenantBySlug: Record<string, TenantView>) {
     const withPath = persistVault(row, tenant);
     // Handover mirror: only for records that entered Building or beyond.
     if (proposal.handover) {
-      writeHandoverMirror(withPath, tenant, Boolean(proposal.archived));
+      writeHandoverMirrorIfAbsent(withPath, tenant, Boolean(proposal.archived));
     }
     run("UPDATE enhancements SET github_path = ? WHERE id = ?", [withPath.github_path, row.id]);
   }
 }
 
 function persistVault(row: Enhancement, tenant: TenantView): Enhancement {
-  const written = writeVaultFile(
+  const written = writeVaultFileIfAbsent(
     row.status === "Archived" ? row : { ...row, status: row.status },
     tenant,
   );
@@ -204,6 +204,9 @@ export async function seed(): Promise<{ tenants: number; people: number; enhance
     console.log("[db:seed] SEED_DEMO_DATA=false — demo content skipped.");
     return { tenants: 0, people: 0, enhancements: 0, skipped: true };
   }
+  // Fast path: a populated hub is never re-seeded, so a repeated run (or a boot
+  // bootstrap racing `db:seed`) cannot rewrite a single Markdown file.
+  const alreadySeeded = count("tenants") > 0;
   const tenantBySlug: Record<string, TenantView> = {};
   for (const seedTenant of SEED_TENANTS) {
     tenantBySlug[seedTenant.slug] = await upsertTenant(seedTenant);
@@ -216,7 +219,7 @@ export async function seed(): Promise<{ tenants: number; people: number; enhance
     tenants: count("tenants"),
     people: count("people"),
     enhancements: count("enhancements"),
-    skipped: false,
+    skipped: alreadySeeded,
   };
   console.log(
     `[db:seed] tenants=${result.tenants} people=${result.people} enhancements=${result.enhancements}`,
@@ -224,7 +227,9 @@ export async function seed(): Promise<{ tenants: number; people: number; enhance
   return result;
 }
 
-// Allow `tsx scripts/seed.ts` (top-level await is fine: .ts runs as ESM here).
+// Only self-execute when run directly as a script. The app imports `seed()` from the
+// serverless bootstrap, and a stray top-level await there would be fatal in CJS output.
+// (top-level await is fine when this file runs as ESM under tsx.)
 const invokedDirectly = /\bseed(\.ts)?$/.test(process.argv[1] ?? "");
 if (invokedDirectly) {
   await seed();
