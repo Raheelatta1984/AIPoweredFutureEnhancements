@@ -1,0 +1,84 @@
+name: Archive enhancements
+
+# A merged PR retires the handover documents it shipped:
+#  1. read explicit `Handover:` lines from the PR body, else fall back to the
+#     handover files the PR actually changed;
+#  2. only documents whose frontmatter status is Building or Built are archivable;
+#  3. move them to archived/ with `status: "Archived"`;
+#  4. commit through git-auto-commit-action, close the linked intake issues, and
+#     write ARCHIVED_NAMES_FILE so later steps can react.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to process (blank = none)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: archive-enhancements-${{ github.event.pull_request.number || inputs.pr_number || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Archive shipped handovers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Archive handover documents
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HANDOVER_GLOB: "handovers/*/ENH-*.md,handovers/*/*/ENH-*.md"
+          ARCHIVED_NAMES_FILE: ${{ github.workspace }}/.tmp/archived-handovers.txt
+        run: node scripts/archive-enhancements.mjs
+
+      - name: Commit archived documents
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(enhancements): archive handovers shipped in PR #${{ github.event.pull_request.number || inputs.pr_number }}"
+          commit_user_name: enhancements-bot
+          commit_user_email: enhancements-bot@users.noreply.github.com
+          file_pattern: "handovers/**/*.md"
+          skip_dirty_check: false
+
+      - name: Close linked intake issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ARCHIVED_NAMES_FILE: ${{ github.workspace }}/.tmp/archived-handovers.txt
+        run: node scripts/close-handover-issues.mjs
+
+      - name: Summarise
+        if: always()
+        run: |
+          echo "### Enhancement archive" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f .tmp/archived-handovers.txt ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat .tmp/archived-handovers.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No documents were archived._" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Deterministic, secret-free test environment.
+      SEED_DEMO_DATA: "true"
+      ENHANCEMENT_DOC_SYNC: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Embed migrations
+        run: npm run db:embed
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Migrate + seed demo data
+        env:
+          DATABASE_FILE: ${{ github.workspace }}/data/ci.db
+          ENHANCEMENT_VAULT_DIR: ${{ github.workspace }}/.tmp/ci-vault
+        run: |
+          npm run db:migrate
+          npm run db:seed
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        env:
+          DATABASE_FILE: ${{ github.workspace }}/data/ci.db
+          ENHANCEMENT_VAULT_DIR: ${{ github.workspace }}/.tmp/ci-vault
+          SESSION_SECRET: ci-only-session-secret-not-a-real-one
+        run: npm run build
