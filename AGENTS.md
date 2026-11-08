@@ -88,5 +88,10 @@ npm test              # node:test + tsx, all green
 npm run build         # never while `next dev` is running (shared .next corruption)
 ```
 
+Test files: `rules` (pure helpers), `studio` (drafting engine), `auth` (scrypt, sessions,
+revocation, tenant-access guard), `lifecycle` (submit → publish → archive → delete) and
+`docs-sync` (repo reconciliation). Files that use top-level await must be `.mts`, because
+tsx compiles a plain `.ts` to CJS and CJS rejects top-level await.
+
 Add a test for every behavioural change. If a rule above needs to change, update this file,
 `docs/DECISIONS.md` and the tests in the same commit.
