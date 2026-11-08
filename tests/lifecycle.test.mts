@@ -133,7 +133,11 @@ test("moving to Building is refused, visibly, when GITHUB_TOKEN is absent", asyn
   const result = await moveStatus(first.id, qaId, "Building", "sofia@qa.demo");
 
   assert.equal(result.ok, false);
-  assert.match(result.error ?? "", /GITHUB_TOKEN/);
+  // The refusal must name the missing credential AND where to fix it: the hub now
+  // accepts a token from the UI, so telling the operator to set an env var alone
+  // would send them to the wrong place.
+  assert.match(result.error ?? "", /no GitHub token is configured/i);
+  assert.match(result.error ?? "", /\/tenants/);
   assert.match(result.error ?? "", /Stage unchanged|NOT changed/i);
 
   // Status never lies: it is still Submitted, and no handover path was invented.

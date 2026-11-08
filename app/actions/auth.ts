@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { findPersonByEmail, issueSession, revokeAllForPerson, revokeSession, verifyPassword } from "../../lib/auth.ts";
 import { recordAudit } from "../../lib/audit.ts";
+import { ensureBootReady } from "../../lib/boot.ts";
 import { currentUser } from "../../lib/session.ts";
 import { SESSION_COOKIE, TENANT_COOKIE, SESSION_TTL_SECONDS } from "../../lib/rules.ts";
 import { getTenantById } from "../../lib/tenants.ts";
@@ -23,8 +24,25 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const password = String(formData.get("password") ?? "");
   if (!email || !password) return { error: "Email and password are both required." };
 
+  // The POST can land on an instance that never rendered /login (each serverless
+  // instance has its own empty /tmp), so the database must be ready HERE, not only
+  // in the page. Without this, a first sign-in reports "no active account" even
+  // though the seeded people exist.
+  await ensureBootReady();
+
   const person = findPersonByEmail(email);
-  if (!person || !person.active) return { error: "No active account matches those credentials." };
+  if (!person || !person.active) {
+    // The bootstrap swallows its own failure; if the hub has no people at all, say so
+    // instead of implying the credentials were wrong.
+    const { count } = await import("../../lib/db.ts");
+    if (count("people") === 0) {
+      return {
+        error:
+          "This hub has no accounts yet — seeding did not run on this instance. Set SEED_DEMO_DATA=true (or create a person on /people), then try again.",
+      };
+    }
+    return { error: "No active account matches those credentials." };
+  }
 
   const valid = await verifyPassword(password, person.password_hash);
   if (!valid) return { error: "No active account matches those credentials." };

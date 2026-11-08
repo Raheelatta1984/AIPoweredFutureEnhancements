@@ -1,3 +1,5 @@
+import { resolveGithubToken } from "./github-credentials.ts";
+
 /**
  * Deployment-safety warnings surfaced in the top bar.
  *
@@ -24,7 +26,9 @@ export function ephemeralStorage(): boolean {
 }
 
 export function githubPublishingConfigured(): boolean {
-  return Boolean(process.env.GITHUB_TOKEN?.trim());
+  // Reads the stored (UI-entered) token too — otherwise a perfectly working hub
+  // would keep warning that publishing is off.
+  return resolveGithubToken() !== null;
 }
 
 export type RuntimeWarning = { label: string; detail: string };
@@ -50,7 +54,7 @@ export function runtimeWarnings(): RuntimeWarning[] {
     warnings.push({
       label: "publishing off",
       detail:
-        "GITHUB_TOKEN is unset, so handover publishing cannot push to a consuming repo. Publishing failures block the stage move by design.",
+        "No GitHub token is configured, so handover publishing cannot reach a consuming repo and every move to Building is refused. An admin can paste one on /tenants, or set GITHUB_TOKEN.",
     });
   }
   return warnings;

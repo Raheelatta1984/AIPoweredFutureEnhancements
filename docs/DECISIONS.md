@@ -178,3 +178,31 @@ and starts empty, so the demo handovers committed under `handovers/` would vanis
 union both roots (most specific first, deduped by path); writes only ever touch the writable
 one. The UI therefore shows real documents on a cold deploy without pretending they are
 mutable.
+
+## Why sign-in and publishing failed on the deployed hub
+
+Two reports — "no active account matches those credentials" for every demo account, and a
+refusal on every move to **Building** — turned out to be two different kinds of bug.
+
+**Sign-in.** `loginAction` queried `people` directly, while the bootstrap ran only from the
+`/login` page and `requireUser()`. On a serverless host the login **POST** can land on an
+instance that never rendered the page, and every instance starts with its own empty `/tmp`
+database; the query then returns nothing and the hub blames the credentials. The action now
+awaits `ensureBootReady()` first, `ensureSeed()` stops caching its own failures, and
+readiness requires tenants **and** people so a half-written seed is repaired rather than
+trusted. The lesson generalised: any server action that reads seeded data must be able to
+build it, not assume some earlier page did.
+
+**Publishing.** The refusal was correct but useless: `GITHUB_TOKEN` was the only accepted
+source, and a host with no token has no way to get one, so the gate blocked every stage move
+permanently. Tokens now come from the UI as well (`lib/github-credentials.ts`), encrypted with
+AES-256-GCM under an HKDF subkey of `SESSION_SECRET` so a database dump is not a repo-write
+credential. The environment variable still wins — infrastructure should be able to override
+whatever an admin pasted — and undecryptable ciphertext (secret rotated) degrades to "not
+configured" with an explanation instead of throwing.
+
+**Discovery.** The obvious follow-on: if the hub holds a token that can see the account's
+repositories, an operator should not have to type `owner/repo`. `listRepos()` reads
+`/user/repos` and **/tenants** offers one-click connect, prefilling name and handover folder
+from the repository itself. Connecting is still just a tenant row — the consuming repo gains
+no code, workflow or deploy, which is the whole point of plug-and-play.
