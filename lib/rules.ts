@@ -236,6 +236,14 @@ export type SessionPayload = {
 
 export const SESSION_COOKIE = "feh_session";
 export const TENANT_COOKIE = "feh_tenant";
+/**
+ * Set when an admin explicitly asks to see their GitHub repositories on /tenants.
+ *
+ * Discovery costs two GitHub round-trips and can be slow on a cold deploy, so it runs on
+ * request rather than on every render. The cookie records the intent only — the list is
+ * still fetched from GitHub each time, never cached.
+ */
+export const REPOS_COOKIE = "feh_gh_repos";
 export const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
 function sessionSecret(): string {

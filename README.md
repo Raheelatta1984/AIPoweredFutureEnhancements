@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (81 tests) |
+| `npm test` | `node:test` + `tsx` suite (89 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -228,7 +228,7 @@ components/     dark shell, nav with stable IDs, UI primitives
 lib/            ai.ts · rules.ts · db.ts · vault.ts · github.ts · docs-sync.ts · auth.ts …
 db/             migrations/001_init.sql + generated embed
 scripts/        embed-migrations, migrate, seed, reset, sync-docs-cli, intake/archive/close
-tests/          node:test suites (rules, studio, auth, lifecycle, docs-sync, deploy)
+tests/          node:test suites (rules, studio, auth, lifecycle, docs-sync, deploy, github, publish)
 handovers/      published documents, mirrored per tenant (+ archived/)
 vault/          Markdown mirror of every proposal (+ archive/)
 ```
@@ -248,12 +248,25 @@ An admin opens **/tenants** and finds two panels:
    `docs/enhancements` handover folder) and nothing else — the consuming repository still
    needs no code, no workflow and no deploy.
 
-The panel opens with **Test connection**, which reports the account and the *number* of
-repositories the token can see — `8` where you expect `21` is the signature of a fine-grained
-token scoped to selected repos. If the list is empty, the panel says why: no token in use, a token without the `repo` scope,
-or an empty `GITHUB_TOKEN` variable in your hosting settings overriding the stored one. On a
-serverless host a stored token lives in `/tmp`, so it is lost on the next cold start — set the
-environment variable for a lasting connection.
+The list opens on request (**Load my projects**) rather than on every page view: discovery is
+two GitHub calls and a slow API used to hold up the whole admin screen.
+
+**A short list is explained, never just displayed.** `/user/repos` can only return what the
+token may see, so a fine-grained token scoped to one repository looks identical to an account
+with one repository. The panel therefore compares three numbers — the repositories this token
+lists, the public repositories on the account's profile, and the total GitHub reports for the
+credential — and says which one is out of line:
+
+> Only 1 of the 21 repositories on Raheelatta1984 **is** visible to this token.
+> (Repositories this token lists: 1 · Public repositories on that profile: 21)
+
+with the fix (fine-grained token → **Repository access: All repositories**, or a classic token
+with the `repo` scope). The same report is returned by **Test connection**, by *Save and verify*,
+and by a connect attempt that names a repository the token cannot see. Other causes stay
+separate: no token in use, an empty `GITHUB_TOKEN` variable overriding a stored one, a token
+without the `repo` scope, an organisation that has not granted access, and the 1000-repo page
+cap. On a serverless host a stored token lives in `/tmp`, so it is lost on the next cold start —
+set the environment variable for a lasting connection.
 
 Without a token the hub refuses every move to **Building** and says so — publishing is the
 gate, not a background nicety.
