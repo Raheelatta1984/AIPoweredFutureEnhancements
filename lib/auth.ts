@@ -12,6 +12,7 @@ import {
   SESSION_TTL_SECONDS,
   signSession,
   verifySession,
+  type SessionFailure,
   type SessionPayload,
 } from "./rules.ts";
 import { getTenantById, visibleTenants } from "./tenants.ts";
@@ -99,9 +100,40 @@ export function revokeAllForPerson(personId: string): void {
   ]);
 }
 
+/**
+ * Is this session still usable?
+ *
+ * A missing row is *not* proof of revocation. Every serverless instance keeps its own
+ * `/tmp` database, so a valid sign-in routinely arrives somewhere that never wrote the
+ * row — treating that as "revoked" signed the operator out with no explanation, and the
+ * admin actions then blamed their role. Only a row that exists **and** is revoked
+ * (deactivation, password rotation, "sign out everywhere") is a real refusal.
+ */
 export function isSessionActive(sessionId: string): boolean {
-  const row = get<{ id: string }>("SELECT id FROM sessions WHERE id = ? AND revoked_at IS NULL", [sessionId]);
-  return row !== null;
+  const row = get<{ revoked_at: string | null }>("SELECT revoked_at FROM sessions WHERE id = ?", [sessionId]);
+  if (!row) return true;
+  return row.revoked_at === null;
+}
+
+/** True when this instance actually knows the session (it wrote or saw the row). */
+export function hasSessionRecord(sessionId: string): boolean {
+  return get<{ id: string }>("SELECT id FROM sessions WHERE id = ?", [sessionId]) !== null;
+}
+
+export function resolveSessionDetailed(
+  token: string | undefined | null,
+  cookieTenantId: string | null = null,
+): { user: SessionUser | null; failure?: SessionFailure; reverified?: boolean } {
+  const payload = verifySession(token);
+  if (!payload) return { user: null, failure: token ? "invalid-token" : "no-cookie" };
+  const person = findPersonById(payload.sub);
+  if (!person) return { user: null, failure: "unknown-person" };
+  if (!person.active) return { user: null, failure: "inactive-person" };
+  if (!isSessionActive(payload.sid)) return { user: null, failure: "unknown-session" };
+  // No row on this instance is not a refusal (see `isSessionActive`), but it *is* worth
+  // saying out loud: it means the sign-in was honoured from the cookie alone.
+  const reverified = !hasSessionRecord(payload.sid);
+  return { user: resolveSession(token, cookieTenantId), reverified };
 }
 
 /** Resolves a cookie token into a fully-scoped user (or null). */

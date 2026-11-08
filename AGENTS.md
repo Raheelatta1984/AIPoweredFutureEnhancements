@@ -148,6 +148,17 @@ the reasoning; this file is the checklist.
     already served); the GitHub project picker is admin-only on `/tenants`. Both screens say
     what they are, and `/tenants` puts the GitHub panels *above* the tenant list.
 
+42. **Never answer a session problem with a permission message.** `currentUser()` returning
+    `null` has six causes — no cookie, a cookie signed under another `SESSION_SECRET`, an
+    account this instance's database does not have, a deactivated account, a revoked
+    session, and (the deployed one) a cold start that rebuilt `/tmp` mid-session. Admin
+    actions must call `requireAdminAction()` / `requireUserAction()` from `lib/session.ts`,
+    which reports the actual cause via `describeSessionFailure`; `!user?.canAdmin` is banned
+    (`tests/github.test.mts` asserts it). Two mechanisms keep the session alive: seeded
+    identities are derived with `stableId()` so a rebuilt database matches an old cookie,
+    and a *missing* sessions row is trusted while a row that exists and is revoked is not
+    (`isSessionActive`). `resolveSessionDetailed().reverified` lets `/tenants` say so.
+
 ## Verification before you push
 
 ```bash

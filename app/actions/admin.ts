@@ -8,7 +8,7 @@ import { recordAudit } from "../../lib/audit.ts";
 import { run } from "../../lib/db.ts";
 import { tenantSlugFrom } from "../../lib/enhancements.ts";
 import { isRole } from "../../lib/roles.ts";
-import { currentUser } from "../../lib/session.ts";
+import { requireAdminAction } from "../../lib/session.ts";
 import { REPOS_COOKIE } from "../../lib/rules.ts";
 import { getTenantById, listTenants, parseJson } from "../../lib/tenants.ts";
 import { randomUUID } from "node:crypto";
@@ -53,8 +53,9 @@ function parseCatalogue(raw: string): Array<{ id: string; label: string; hint: s
 }
 
 export async function createTenantAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can add tenants." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
 
   const name = String(formData.get("name") ?? "").trim();
   const repo = String(formData.get("github_repo") ?? "").trim();
@@ -109,8 +110,9 @@ export async function createTenantAction(_prev: AdminState, formData: FormData):
 }
 
 export async function updateTenantAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can edit tenants." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   const id = String(formData.get("id") ?? "");
   const tenant = getTenantById(id);
   if (!tenant) return { error: "Unknown tenant." };
@@ -164,8 +166,9 @@ export async function updateTenantAction(_prev: AdminState, formData: FormData):
 }
 
 export async function createPersonAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can add people." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const name = String(formData.get("name") ?? "").trim();
@@ -201,8 +204,9 @@ export async function createPersonAction(_prev: AdminState, formData: FormData):
 }
 
 export async function updatePersonAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can edit people." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   const id = String(formData.get("id") ?? "");
   if (id === user.person.id) return { error: "You cannot change your own role or access level." };
 
@@ -237,8 +241,9 @@ export async function updatePersonAction(_prev: AdminState, formData: FormData):
 
 /** Self-deactivate guard: an admin may never lock themselves out. */
 export async function deactivateSelfAction(): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can do that." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   const row = await import("../../lib/auth.ts").then((m) => m.findPersonById(user.person.id));
   const admins = await import("../../lib/db.ts").then((m) =>
     m.get<{ n: number }>("SELECT COUNT(*) AS n FROM people WHERE role = 'admin' AND active = 1"),
@@ -253,8 +258,9 @@ export async function deactivateSelfAction(): Promise<AdminState> {
 /* ------------------------------------------------------------- github credentials */
 
 export async function saveGithubTokenAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can change the GitHub token." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
 
   const { storeGithubToken, clearGithubToken, tokenState } = await import("../../lib/github-credentials.ts");
   const remove = String(formData.get("remove") ?? "") === "1";
@@ -306,8 +312,9 @@ export async function saveGithubTokenAction(_prev: AdminState, formData: FormDat
 
 /** One-click connect: create a tenant straight from a repository the token can see. */
 export async function connectRepoAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
 
   const fullName = String(formData.get("repo") ?? "").trim();
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) return { error: 'Pick a repository (expected "owner/name").' };
@@ -378,8 +385,9 @@ export async function connectRepoAction(_prev: AdminState, formData: FormData): 
  * becomes a reported error instead of a tenant that can never publish.
  */
 export async function connectReposAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
 
   const { parseRepoLines, listRepos } = await import("../../lib/github.ts");
   const { diagnoseRepoListing } = await import("../../lib/repo-discovery.ts");
@@ -488,8 +496,9 @@ export async function connectReposAction(_prev: AdminState, formData: FormData):
 
 /** "Test connection" — proves the token works without changing any data. */
 export async function testGithubConnectionAction(_prev: AdminState, _formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can test the GitHub connection." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
 
   const { listRepos } = await import("../../lib/github.ts");
   const { tokenSource } = await import("../../lib/github-credentials.ts");
@@ -534,8 +543,9 @@ export async function testGithubConnectionAction(_prev: AdminState, _formData: F
  * records the *intent*; the list itself is still fetched from GitHub on each render.
  */
 export async function loadGithubReposAction(_prev: AdminState, _formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can list repositories." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   const jar = await cookies();
   jar.set(REPOS_COOKIE, "1", { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
   revalidatePath("/tenants");
@@ -543,8 +553,9 @@ export async function loadGithubReposAction(_prev: AdminState, _formData: FormDa
 }
 
 export async function cancelGithubReposAction(_prev: AdminState, _formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can change this." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   const jar = await cookies();
   jar.delete(REPOS_COOKIE);
   revalidatePath("/tenants");
@@ -572,8 +583,9 @@ export async function connectSelectedReposAction(prev: AdminState, formData: For
  * preview is required so a mis-scoped token cannot silently create fifty tenants.
  */
 export async function connectAllVisibleReposAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
-  const user = await currentUser();
-  if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
+  const guard = await requireAdminAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   if (String(formData.get("confirm") ?? "") !== "1") {
     return { error: "Tick “I understand this creates one tenant per repository” first." };
   }

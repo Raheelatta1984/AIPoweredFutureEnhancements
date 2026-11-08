@@ -319,3 +319,41 @@ export function relativeTime(iso: string, now = Date.now()): string {
   if (days < 30) return `${days}d ago`;
   return new Date(iso).toISOString().slice(0, 10);
 }
+
+/* ----------------------------------------------------------- session failures */
+
+/**
+ * Why a session cookie did not become a user — the distinction that must reach the screen.
+ *
+ * "Only hub admins can do that" was the answer to six unrelated problems, including an
+ * expired cookie and a serverless cold start. Each failure now says what happened and what
+ * to do. Pure (no imports beyond crypto) so the wording is unit-testable.
+ */
+export type SessionFailure =
+  /** No cookie at all. */
+  | "no-cookie"
+  /** Cookie present but the HMAC/expiry check failed (rotated SESSION_SECRET, tampering). */
+  | "invalid-token"
+  /** Valid signature, but this instance's database has no such person (another instance seeded). */
+  | "unknown-person"
+  /** The person row exists but is deactivated. */
+  | "inactive-person"
+  /** The sessions row is revoked — deactivation, password rotation, or "sign out everywhere". */
+  | "unknown-session";
+
+export function describeSessionFailure(failure: SessionFailure | undefined): string {
+  switch (failure) {
+    case "no-cookie":
+      return "This action needs a signed-in admin, and this request arrived without a session. Sign in again, then retry.";
+    case "invalid-token":
+      return "Your session cookie is no longer valid (it was issued under a different SESSION_SECRET, or it expired). Sign in again.";
+    case "unknown-person":
+      return "Your session is for an account this instance cannot find — its database was rebuilt (a cold start on a serverless host). Sign in again; if that keeps happening, set a durable DATABASE_FILE.";
+    case "inactive-person":
+      return "This account has been deactivated, so it cannot administer the hub.";
+    case "unknown-session":
+      return "Your sign-in was revoked, or it belongs to an instance this hub no longer has (deactivation, a password change, or “sign out everywhere”). Sign in again — nothing was changed.";
+    default:
+      return "You are signed in, but this account is not a hub admin.";
+  }
+}

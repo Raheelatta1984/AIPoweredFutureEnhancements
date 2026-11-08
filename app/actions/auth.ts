@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { findPersonByEmail, issueSession, revokeAllForPerson, revokeSession, verifyPassword } from "../../lib/auth.ts";
 import { recordAudit } from "../../lib/audit.ts";
 import { ensureBootReady } from "../../lib/boot.ts";
-import { currentUser } from "../../lib/session.ts";
+import { requireUserAction } from "../../lib/session.ts";
 import { SESSION_COOKIE, TENANT_COOKIE, SESSION_TTL_SECONDS } from "../../lib/rules.ts";
 import { getTenantById } from "../../lib/tenants.ts";
 
@@ -65,7 +65,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
 export async function logoutAction() {
   const jar = await cookies();
-  const user = await currentUser();
+  const guard = await requireUserAction();
+  const user = guard.user;
   const token = jar.get(SESSION_COOKIE)?.value;
   if (user) {
     recordAudit({ tenantId: user.tenantId, actor: user.person.email, action: "session.logout", subject: user.person.email });
@@ -78,7 +79,8 @@ export async function logoutAction() {
 
 /** Revokes every live session for the signed-in person. */
 export async function revokeMySessionsAction() {
-  const user = await currentUser();
+  const guard = await requireUserAction();
+  const user = guard.user;
   if (!user) redirect("/login");
   revokeAllForPerson(user.person.id);
   recordAudit({ tenantId: user.tenantId, actor: user.person.email, action: "session.revoked_all", subject: user.person.email });
@@ -94,7 +96,8 @@ export async function revokeMySessionsAction() {
 
 /** Hub-level switcher: stores the chosen tenant for the session cookie lifetime. */
 export async function switchTenantAction(formData: FormData) {
-  const user = await currentUser();
+  const guard = await requireUserAction();
+  const user = guard.user;
   if (!user) redirect("/login");
   const tenantId = String(formData.get("tenant_id") ?? "");
   if (!user.canSwitchTenant) {

@@ -21,7 +21,9 @@ const {
   resolveSession,
   revokeSession,
   revokeAllForPerson,
+  hasSessionRecord,
   isSessionActive,
+  resolveSessionDetailed,
   stripPerson,
   assertTenantAccess,
   findPersonByEmail,
@@ -169,9 +171,12 @@ test("inactive people and forged tokens never resolve", () => {
   const ghost = signSession({ sub: "person-does-not-exist", sid: payload.sid, iat: 1, exp: 4_000_000_000 });
   assert.equal(resolveSession(ghost, null), null);
 
-  // A token whose sid was never recorded (never issued here).
+  // A token whose sid this instance never recorded resolves: a serverless cold start
+  // wipes the sessions table, and signing everyone out on every cold start is worse than
+  // trusting the signature. A row that exists AND is revoked is still refused (above).
   const unissued = signSession({ sub: qaEditor, sid: "sid-never-issued", iat: 1, exp: 4_000_000_000 });
-  assert.equal(resolveSession(unissued, null), null);
+  assert.equal(hasSessionRecord("sid-never-issued"), false, "this instance has no row for it");
+  assert.ok(resolveSession(unissued, null), "an unrecorded session is trusted, not treated as revoked");
 
   // Garbage in, nothing out.
   assert.equal(resolveSession("", null), null);
@@ -250,4 +255,69 @@ test("stripPerson and findPersonByEmail behave", () => {
   // Every login attempt recorded a session row for the person.
   const count = get<{ n: number }>("SELECT COUNT(*) AS n FROM sessions WHERE person_id = ?", [qaEditor]);
   assert.ok(Number(count!.n) >= 1);
+});
+
+/* ------------------------------------------- surviving a cold start (the real bug) */
+
+/**
+ * The reported symptom: "only hub admins can add" while signed in as the hub admin.
+ *
+ * A serverless hub gets a fresh `/tmp` database on a cold start. Two things used to make a
+ * 12-hour session die with that database, and both failed *silently* — the admin actions
+ * then blamed the operator's role. These assert the mechanisms, because the wording is
+ * useless if the mechanics regress.
+ */
+test("seeded identities survive a rebuilt database, so an old cookie still matches", async () => {
+  const { stableId } = await import("../lib/db.ts");
+  // Same derivation twice — a rebuilt /tmp database must produce the same person id.
+  assert.equal(stableId("seed-person", "amara.okafor@hub.demo"), stableId("seed-person", "amara.okafor@hub.demo"));
+  assert.notEqual(stableId("seed-person", "amara.okafor@hub.demo"), stableId("seed-person", "priya.raman@hub.demo"));
+  // UUID-shaped, so nothing downstream needs to special-case it.
+  assert.match(stableId("seed-person", "amara.okafor@hub.demo"), /^[a-z0-9-]+-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
+});
+
+test("a session this instance never recorded is trusted; a revoked one is not", () => {
+  // Cold start: the row is simply absent (the previous instance wrote it).
+  const { token, payload } = issueSession(hubAdmin);
+  run("DELETE FROM sessions WHERE id = ?", [payload.sid]);
+  assert.equal(hasSessionRecord(payload.sid), false);
+  assert.equal(resolveSession(token, null)?.person.id, hubAdmin, "signature + expiry still hold");
+
+  // Real revocation still wins, and is distinguishable from absence.
+  const revoked = issueSession(hubAdmin);
+  revokeSession(revoked.payload.sid);
+  assert.equal(hasSessionRecord(revoked.payload.sid), true, "this instance knows the row");
+  assert.equal(resolveSession(revoked.token, null), null, "revoked means revoked");
+});
+
+test("every way a cookie can fail is named, and none of them is 'not an admin'", () => {
+  const { describeSessionFailure } = verifySessionModule;
+  const cases = ["no-cookie", "invalid-token", "unknown-person", "inactive-person", "unknown-session"] as const;
+  const messages = cases.map((failure) => describeSessionFailure(failure));
+  for (const [index, message] of messages.entries()) {
+    assert.ok(message.length > 20, `${cases[index]} must explain itself`);
+    assert.doesNotMatch(message, /only hub admins/i, `${cases[index]} must not blame the role`);
+  }
+  assert.match(describeSessionFailure("unknown-session"), /Sign in again/);
+  assert.match(describeSessionFailure("unknown-person"), /Sign in again/);
+  assert.match(describeSessionFailure("invalid-token"), /SESSION_SECRET|expired/);
+  // Only a real role problem says "not an admin".
+  assert.match(describeSessionFailure(undefined), /not a hub admin/);
+});
+
+test("resolveSessionDetailed separates a missing row from a revoked one", () => {
+  const { token, payload } = issueSession(hubAdmin);
+  assert.equal(resolveSessionDetailed(token, null).failure, undefined);
+
+  run("DELETE FROM sessions WHERE id = ?", [payload.sid]);
+  const cold = resolveSessionDetailed(token, null);
+  assert.equal(cold.user?.person.id, hubAdmin, "absence is not a refusal");
+  assert.equal(cold.failure, undefined);
+
+  const revoked = issueSession(hubAdmin);
+  revokeSession(revoked.payload.sid);
+  assert.equal(resolveSessionDetailed(revoked.token, null).failure, "unknown-session");
+
+  assert.equal(resolveSessionDetailed("", null).failure, "no-cookie");
+  assert.equal(resolveSessionDetailed("not.a.token", null).failure, "invalid-token");
 });

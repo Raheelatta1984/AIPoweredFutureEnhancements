@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 
 import { recordAudit } from "../../lib/audit.ts";
 import { docsSyncEnabled, syncEnhancementDocs, type SyncReport } from "../../lib/docs-sync.ts";
-import { currentUser } from "../../lib/session.ts";
+import { requireUserAction } from "../../lib/session.ts";
 
 export type SyncActionResult = {
   ok: boolean;
@@ -15,8 +15,9 @@ export type SyncActionResult = {
 
 /** Editor-gated reconciliation triggered from the Handovers tab. */
 export async function syncDocsAction(): Promise<SyncActionResult> {
-  const user = await currentUser();
-  if (!user) redirect("/login");
+  const guard = await requireUserAction();
+  if (!guard.user) return { ok: false, message: guard.error };
+  const user = guard.user;
   if (!user.canEdit) {
     return { ok: false, message: "Your role cannot run a sync (editor or above required)." };
   }

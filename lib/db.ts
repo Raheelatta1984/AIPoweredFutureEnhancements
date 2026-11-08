@@ -8,6 +8,7 @@
  *  2. Bound values must be `null | number | bigint | string | Uint8Array`. JS
  *     `undefined` throws and booleans are rejected, so `normalise()` coerces.
  */
+import { createHash } from "node:crypto";
 import { constants, accessSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -46,6 +47,24 @@ export function databaseFile(): string {
     return join("/tmp", "enhancements", "enhancements.db");
   }
   return join(root, "data", "enhancements.db");
+}
+
+/**
+ * Stable, derivable ids for seeded rows.
+ *
+ * A serverless hub rebuilds its `/tmp` database on every cold start, and `randomUUID()`
+ * gave the same demo person a new id each time — so a session cookie signed nine minutes
+ * ago pointed at a person id that no longer existed and *every* admin action answered
+ * "only hub admins can do that". Deriving the id from the seed key makes a rebuilt
+ * database byte-identical for the rows whose identity must outlive it.
+ */
+export function stableId(...parts: string[]): string {
+  const key = parts.join("|");
+  const digest = createHash("sha256").update(key).digest("hex");
+  // A readable prefix ("seed-person-amara-") so a row can be identified by eye, plus a
+  // digest tail so distinct keys never collide. UUID-shaped, like every other id here.
+  const slug = key.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${slug.slice(0, 16).padEnd(16, "0")}-${digest.slice(0, 4)}-${digest.slice(4, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 24)}`;
 }
 
 export function isEphemeralDatabase(): boolean {

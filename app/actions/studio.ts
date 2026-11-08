@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { createEnhancement } from "../../lib/enhancements.ts";
-import { currentUser } from "../../lib/session.ts";
+import { requireUserAction } from "../../lib/session.ts";
 import { DRAFT_FIELDS, type DraftField } from "../../lib/ai.ts";
 import { isStatus } from "../../lib/rules.ts";
 
@@ -17,8 +17,9 @@ const KNOWN_FIELDS = new Set<string>(DRAFT_FIELDS);
  * select is named "area", so this action always sees populated keys.
  */
 export async function submitProposalAction(_prev: SubmitState, formData: FormData): Promise<SubmitState> {
-  const user = await currentUser();
-  if (!user) redirect("/login");
+  const guard = await requireUserAction();
+  if (!guard.user) return { error: guard.error };
+  const user = guard.user;
   if (!user.tenantId) return { error: "Select a tenant before submitting a proposal." };
   if (!user.canEdit) return { error: "Your role is read-only, so it cannot submit proposals." };
 
