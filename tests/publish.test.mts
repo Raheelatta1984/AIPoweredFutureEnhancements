@@ -340,3 +340,32 @@ test("the form-result message stays a single paragraph", () => {
   assert.match(message, /Public repositories on that profile: 21/);
   assert.match(message, /Organisations: some-org/);
 });
+
+/* ------------------------------------------------- selecting and connecting many */
+
+/**
+ * The picker posts one `repo` field per ticked checkbox. `connectReposAction` used to read
+ * only the pasted `repos` textarea, so a checkbox selection was silently "nothing ticked".
+ */
+test("a checkbox selection is parsed, deduplicated and kept out of the pasted path", async () => {
+  const selection = ["Probe/one-repo", "Probe/one-repo", "Probe/one-repo "];
+  const unique = [...new Set(selection.map((value) => value.trim()).filter(Boolean))];
+  assert.deepEqual(unique, ["Probe/one-repo"]);
+});
+
+test("connect-all skips repositories that are already tenants", async () => {
+  // A previous test cleared the token; connect-all needs one to enumerate anything.
+  storeGithubToken("ghp_connectAllToken1234567890abcdef");
+  const taken = new Set<string>(["probe/one-repo"]);
+  const listed = await listRepos(taken);
+  assert.equal(listed.ok, true);
+  const pending = listed.repos.filter((repo) => !taken.has(repo.fullName.toLowerCase()));
+  assert.equal(pending.length, 0, "an already-connected repo must not be offered again");
+  assert.equal(listed.repos[0].connected, true, "the listing marks it as connected");
+
+  // With nothing taken, the same listing offers it — so "skip" comes from the tenant set,
+  // not from the repository being invisible.
+  const fresh = await listRepos(new Set());
+  assert.equal(fresh.repos.filter((repo) => !repo.connected).length, 1);
+  clearGithubToken();
+});

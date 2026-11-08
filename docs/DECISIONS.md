@@ -239,6 +239,15 @@ still fetched fresh on each render, never cached — a stale repository list is 
 "is this mine, and can I connect it?" — below the fold on a phone. Repositories are cards now,
 with the connect form above them and the bulk form collapsed.
 
+**The switcher was the real screen.** The follow-up report named it exactly: the white popup
+over the Overview page is the tenant switcher (`<select>` + **Switch**), and it can only list
+tenants. Two tenants existed, so two rows appeared, and the honest reading of that screen —
+"my repositories are missing" — was wrong in a way the UI invited. Connecting was also a
+one-at-a-time `<select>`, which made "connect twenty projects" a twenty-step chore. The picker
+now ticks many and connects them in one submit, and **Connect all N visible projects** (gated
+on a confirmation checkbox) mirrors the token's whole repository list into tenants. The panel
+also states, in the place the confusion occurred, that the top-bar switcher lists tenants only.
+
 A note on what this cannot fix: if the token genuinely cannot see a repository, the hub cannot
 connect it or publish into it either. The remedy is always on the GitHub side (repository access
 on a fine-grained token, the `repo` scope on a classic one, SSO approval for an organisation) —
