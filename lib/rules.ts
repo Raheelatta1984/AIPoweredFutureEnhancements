@@ -246,11 +246,6 @@ function sessionSecret(): string {
   return "dev-only-insecure-session-secret-change-me";
 }
 
-export function usingFallbackSecret(): boolean {
-  const secret = process.env.SESSION_SECRET?.trim();
-  return !secret || secret.length < 16;
-}
-
 function b64url(input: Buffer | string): string {
   return Buffer.from(input as never)
     .toString("base64")

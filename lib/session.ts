@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { resolveSession } from "./auth.ts";
+import { ensureBootReady } from "./boot.ts";
 import { SESSION_COOKIE, TENANT_COOKIE } from "./rules.ts";
 import type { SessionUser } from "./types.ts";
 
@@ -19,6 +20,8 @@ export async function currentUser(): Promise<SessionUser | null> {
 
 /** Guard for pages: redirects to /login when there is no valid session. */
 export async function requireUser(): Promise<SessionUser> {
+  // First request on a fresh database (serverless /tmp) must not race the seed.
+  await ensureBootReady();
   const user = await currentUser();
   if (!user) redirect("/login");
   return user;

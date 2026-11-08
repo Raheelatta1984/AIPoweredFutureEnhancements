@@ -2,12 +2,15 @@ import { redirect } from "next/navigation";
 
 import { LoginForm } from "./LoginForm.tsx";
 import { DEMO_PASSWORD } from "../../lib/flags.ts";
+import { ensureBootReady } from "../../lib/boot.ts";
 import { currentUser } from "../../lib/session.ts";
 import { listTenants } from "../../lib/tenants.ts";
 
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
+  // Login is the first page anyone sees: make sure the demo hub exists before listing it.
+  await ensureBootReady();
   const user = await currentUser();
   if (user) redirect("/");
 

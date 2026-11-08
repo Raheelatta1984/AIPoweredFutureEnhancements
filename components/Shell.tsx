@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { logoutAction, switchTenantAction } from "../app/actions/auth.ts";
 import { ROLE_LABELS } from "../lib/roles.ts";
+import { runtimeWarnings } from "../lib/runtime-warnings.ts";
 import type { SessionUser, TenantView } from "../lib/types.ts";
 
 export type NavKey = "overview" | "studio" | "vault" | "handovers" | "tenants" | "people" | "audit";
@@ -41,6 +42,8 @@ function TenantBadge({ tenant }: { tenant: TenantView | null }) {
 
 export function TopBar({ user, active, ephemeral }: { user: SessionUser; active: NavKey; ephemeral: boolean }) {
   const tenant = user.tenants.find((t) => t.id === user.tenantId) ?? null;
+  // Present whether or not the caller passed `ephemeral`, so a deploy can never hide them.
+  const warnings = runtimeWarnings();
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -80,7 +83,12 @@ export function TopBar({ user, active, ephemeral }: { user: SessionUser; active:
           ) : (
             <TenantBadge tenant={tenant} />
           )}
-          {ephemeral ? (
+          {warnings.map((warning) => (
+            <span key={warning.label} className="tag amber" title={warning.detail}>
+              {warning.label}
+            </span>
+          ))}
+          {ephemeral && !warnings.some((w) => w.label === "ephemeral /tmp") ? (
             <span className="tag amber" title="Serverless filesystem: the vault lives in /tmp and is not durable.">
               ephemeral /tmp
             </span>

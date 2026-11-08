@@ -80,6 +80,26 @@ the reasoning; this file is the checklist.
 26. **Intake is idempotent.** Issues are matched by the hidden `<!-- handover: path -->`
     marker; never open a second issue for the same document.
 
+## Deployment
+
+27. **`vercel.json` must keep `framework: nextjs`.** Without it the project is inferred as a
+    static site and every build dies with `STATIC_BUILD_NO_OUT_DIR`. This is a one-line file
+    that costs hours to rediscover.
+28. **Serverless paths stay lazy and out of the bundle.** Vercel mounts the bundle read-only,
+    so `databaseFile()`, `vaultRoot()`, `handoverMirrorRoot()` and the sync report all fall
+    back to `/tmp/enhancements/*` when `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME` is set. Read the
+    flags *inside* the function, never in a module-level `const` — a frozen constant makes the
+    behaviour untestable and invisible to env overrides.
+29. **First request must be able to build the database.** `ensureBootReady()` (via
+    `requireUser`) migrates, seeds when empty and `SEED_DEMO_DATA` is on, then starts the doc
+    sync. Pages `await` it, so nothing renders against a half-built database.
+30. **Seeding never rewrites an existing document.** `writeVaultFileIfAbsent` /
+    `writeHandoverMirrorIfAbsent` exist so `db:seed` cannot churn `submitted_on` in committed
+    fixtures; `seed()` reports `skipped: true` when the hub already has tenants.
+31. **Warn loudly, never silently.** `runtimeWarnings()` renders a top-bar tag for a dev
+    session secret, ephemeral storage and disabled publishing. A deployment must never look
+    healthy while losing data or accepting forgeable cookies.
+
 ## Verification before you push
 
 ```bash
@@ -89,8 +109,9 @@ npm run build         # never while `next dev` is running (shared .next corrupti
 ```
 
 Test files: `rules` (pure helpers), `studio` (drafting engine), `auth` (scrypt, sessions,
-revocation, tenant-access guard), `lifecycle` (submit → publish → archive → delete) and
-`docs-sync` (repo reconciliation). Files that use top-level await must be `.mts`, because
+revocation, tenant-access guard), `lifecycle` (submit → publish → archive → delete),
+`docs-sync` (repo reconciliation) and `deploy` (seed idempotency, serverless paths, runtime
+warnings). Files that use top-level await must be `.mts`, because
 tsx compiles a plain `.ts` to CJS and CJS rejects top-level await.
 
 Add a test for every behavioural change. If a rule above needs to change, update this file,

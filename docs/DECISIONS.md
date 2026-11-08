@@ -141,3 +141,40 @@ becomes guesswork.
 write. Allowing a file to jump a proposal from `Submitted` to `Built` would let the pipeline
 be rewritten without review. The one exception is archiving, which is a clean terminal state
 — and even then `Rejected` is protected because a human rejection outranks a file.
+
+## Why the deployment is shaped this way
+
+**The failure that produced these rules.** The first Vercel deploy ended in
+`404 DEPLOYMENT_NOT_FOUND`. The build log looked healthy — install, migrations, `next build`,
+the full route table — and then died on the last line:
+
+```
+Error: [STATIC_BUILD_NO_OUT_DIR] No Output Directory named "public" found
+```
+
+The repository had no `vercel.json`, so the project was created with `framework: null` and was
+built as a **static site**. Next's real output (`.next`) was ignored and Vercel went looking
+for `public/`. `vercel.json` now pins `framework: nextjs`; the file is one line and it is the
+only thing that makes the deploy a Next app.
+
+**Then the app has to survive the host.** Three paths are writable in this code (database,
+vault, handover mirror) plus a report file, and a serverless bundle is read-only. Each one
+already had an env override, so the fallback is the same rule everywhere: explicit override
+first, `/tmp/enhancements/*` on serverless, repository path otherwise. The check is done
+inside the function rather than in a module-level constant: a `const SERVERLESS = …` freezes
+the first read, which makes the behaviour untestable and surprising when an env var arrives
+later (tests, `next start` with `VERCEL=1`).
+
+**And it has to be honest about it.** A hub running on `/tmp` loses every proposal when the
+function recycles; a hub signing cookies with the public dev secret accepts forged sessions.
+Both are invisible until they hurt. Rather than hide them, the first request bootstraps
+(migrate → seed when the database is empty → doc sync) so the demo is usable immediately, and
+the top bar states the three risks — `dev session secret`, `ephemeral /tmp`, `publishing off`
+— as amber tags. The seed path is `writeVaultFileIfAbsent` / `writeHandoverMirrorIfAbsent`, so
+booting beside a populated repository cannot rewrite a committed document.
+
+**Why the reader also needs the committed mirror.** On serverless the mirror lives in `/tmp`
+and starts empty, so the demo handovers committed under `handovers/` would vanish. Reads
+union both roots (most specific first, deduped by path); writes only ever touch the writable
+one. The UI therefore shows real documents on a cold deploy without pretending they are
+mutable.

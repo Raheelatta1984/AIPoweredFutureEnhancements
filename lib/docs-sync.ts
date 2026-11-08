@@ -271,9 +271,15 @@ export function reconcile(
 
 const LOCAL_REPORT_DIR = ".tmp";
 
+/** Lazy (not module-level) so tests and env overrides can flip it per call. */
+function serverless(): boolean {
+  return Boolean(process.env.VERCEL) || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
+
 function writeReport(report: SyncReport) {
   try {
-    const dir = resolve(process.cwd(), LOCAL_REPORT_DIR);
+    // Serverless bundles are read-only; the repo report path would throw EROFS.
+    const dir = serverless() ? "/tmp/enhancements/.tmp" : resolve(process.cwd(), LOCAL_REPORT_DIR);
     mkdirSync(dir, { recursive: true });
     const lines = [
       "# Enhancement docs sync",
