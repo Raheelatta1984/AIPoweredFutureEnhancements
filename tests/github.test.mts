@@ -302,3 +302,40 @@ test("a working env token is reported as 'env', and beats a stored one", () => {
     clearGithubToken();
   }
 });
+
+/* ------------------------------------------- admin actions must not blame the role */
+
+/**
+ * The deployed bug: "only hub admins can add", while signed in as the hub admin.
+ *
+ * Two separate mechanisms made a valid session vanish; both are asserted here because the
+ * user-facing wording is worthless if either regresses. The wording itself lives in
+ * `describeSessionFailure` and is covered in `auth.test.mts`.
+ */
+test("no server action still fakes an admin guard with `!user?.canAdmin`", () => {
+  const files = ["../app/actions/admin.ts", "../app/actions/enhancements.ts", "../app/actions/auth.ts"];
+  for (const file of files) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(
+      source,
+      /!user\?\.canAdmin/,
+      `${file} must use requireAdminAction(), which distinguishes signed-out from not-admin`,
+    );
+  }
+  // …and the guard is what the admin actions actually call.
+  const admin = readFileSync(new URL("../app/actions/admin.ts", import.meta.url), "utf8");
+  assert.match(admin, /requireAdminAction\(\)/);
+  assert.doesNotMatch(admin, /Only hub admins can/);
+});
+
+test("the seeded demo identities are derivable, so a rebuilt database matches an old cookie", async () => {
+  const { stableId } = await import("../lib/db.ts");
+  const { SEED_PEOPLE, SEED_TENANTS } = await import("../lib/seed-data.ts");
+  // Every seeded person and tenant has a stable id, and they are all distinct.
+  const ids = [
+    ...SEED_PEOPLE.map((person) => stableId("seed-person", person.email)),
+    ...SEED_TENANTS.map((tenant) => stableId("seed-tenant", tenant.slug)),
+  ];
+  assert.equal(new Set(ids).size, ids.length, "no two seeded rows share an id");
+  assert.equal(stableId("seed-person", SEED_PEOPLE[0].email), ids[0], "derivation is pure");
+});

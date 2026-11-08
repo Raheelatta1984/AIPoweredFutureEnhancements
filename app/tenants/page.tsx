@@ -4,11 +4,12 @@ import { AppShell, PageHead } from "../../components/Shell.tsx";
 import { Card, Notice } from "../../components/ui.tsx";
 import { isEphemeralDatabase } from "../../lib/db.ts";
 import { requireAdmin } from "../../lib/session.ts";
+import { resolveSessionDetailed } from "../../lib/auth.ts";
+import { REPOS_COOKIE, SESSION_COOKIE, TENANT_COOKIE } from "../../lib/rules.ts";
 import { catalogueFor, listTenants } from "../../lib/tenants.ts";
 import type { RepoListResult } from "../../lib/github.ts";
 import { githubConfigured, listRepos } from "../../lib/github.ts";
 import { tokenSource } from "../../lib/github-credentials.ts";
-import { REPOS_COOKIE } from "../../lib/rules.ts";
 import { GithubConnectPanel } from "./GithubConnectPanel.tsx";
 import { TenantForm } from "./TenantForm.tsx";
 
@@ -27,7 +28,16 @@ export default async function TenantsPage() {
   // Discovery runs on request, not on every page view: it is two GitHub round-trips and a
   // slow API used to block the whole admin screen. The cookie records the intent; the list
   // is still fetched fresh here, never cached.
-  const loaded = (await cookies()).get(REPOS_COOKIE)?.value === "1";
+  const jar = await cookies();
+  const loaded = jar.get(REPOS_COOKIE)?.value === "1";
+
+  // A cold start can wipe the instance that issued this session. Say so on the page, where
+  // the operator can act on it, instead of letting the first admin action answer
+  // "only hub admins can …" long after the fact.
+  const resolved = resolveSessionDetailed(jar.get(SESSION_COOKIE)?.value, jar.get(TENANT_COOKIE)?.value ?? null);
+  const sessionNotice = resolved.reverified
+    ? "This instance had no record of your sign-in — a cold start rebuilt its database — so it was verified from your cookie instead. Nothing you saved was lost, and the admin actions below work normally."
+    : null;
   const listed: RepoListResult =
     live && loaded
       ? await listRepos(connectedRepos)
@@ -52,6 +62,8 @@ export default async function TenantsPage() {
       </PageHead>
 
       <div className="stack">
+        {sessionNotice ? <Notice tone="warn">{sessionNotice}</Notice> : null}
+
         <GithubConnectPanel
           tokenState={source.ok ? (source.kind === "env" ? "env" : "stored") : "none"}
           tokenHint={source.ok && "hint" in source ? source.hint : null}

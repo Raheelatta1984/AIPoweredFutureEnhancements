@@ -252,3 +252,35 @@ A note on what this cannot fix: if the token genuinely cannot see a repository, 
 connect it or publish into it either. The remedy is always on the GitHub side (repository access
 on a fine-grained token, the `repo` scope on a classic one, SSO approval for an organisation) —
 so the panel names it instead of retrying.
+
+## Why the hub admin was told "only hub admins can add"
+
+Reported after signing in as Amara (admin): connecting or adding a repository answered
+*"Only hub admins can add tenants."* The account was correct, the password was correct, and
+the page had just rendered as the admin. Nothing about the role was wrong.
+
+`currentUser()` resolves the cookie against **this instance's** database, and every guard was
+written as `if (!user?.canAdmin) return { error: "Only hub admins …" }`. So *any* reason the
+session failed to resolve — no cookie, a rotated `SESSION_SECRET`, a deactivated account, a
+revoked session, or a serverless cold start that rebuilt `/tmp` between the page render and
+the form post — was reported as a permission problem. Two of those were live on Vercel:
+
+1. **The seed used `randomUUID()`.** A rebuilt `/tmp` database gave the same demo person a
+   *different* id, so a cookie minted before the cold start pointed at a person that no longer
+   existed. Seeded people and tenants now use `stableId()` (readable prefix + SHA-256 tail), so
+   a rebuilt database is byte-identical for the rows an identity must survive.
+2. **A missing sessions row was treated as revoked.** The sessions table exists so an admin
+   can revoke early — but "no row here" is the normal state on an instance that never saw the
+   sign-in. `isSessionActive()` now returns false only for a row that *exists and is revoked*;
+   absence is trusted, because the cookie is signed and time-boxed. `hasSessionRecord()` keeps
+   the distinction available, and `/tenants` uses it to say "verified from your cookie" once.
+
+The reporting is fixed too, and that is the part that must not regress: `requireAdminAction()`
+and `requireUserAction()` return the reason (`describeSessionFailure`), so a stale cookie reads
+"sign in again" and only a genuine role mismatch mentions admins. `tests/github.test.mts` fails
+the build if any server action reintroduces `!user?.canAdmin`.
+
+Verified with two processes, not one: sign in → stop the server → delete the database → start a
+new process → replay the cookie. `/tenants` renders, the notice appears, adding a tenant works,
+and Test connection keeps working (the in-process version of that test is invalid — an open
+SQLite handle keeps serving rows from a file that was unlinked underneath it).

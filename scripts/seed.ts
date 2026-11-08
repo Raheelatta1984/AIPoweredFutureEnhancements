@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 
 import { hashPassword } from "../lib/auth.ts";
-import { count, get, migrate, run, setSetting } from "../lib/db.ts";
+import { count, get, migrate, run, setSetting, stableId } from "../lib/db.ts";
 import { seedDemoDataEnabled, DEMO_PASSWORD } from "../lib/flags.ts";
 import { writeHandoverMirrorIfAbsent } from "../lib/handovers.ts";
 import {
@@ -27,7 +27,9 @@ function iso(daysAgo: number): string {
 async function upsertTenant(seed: SeedTenant): Promise<TenantView> {
   const existing = getTenantBySlug(seed.slug);
   if (existing) return existing;
-  const id = randomUUID();
+  // Deterministic: a rebuilt /tmp database must give the same tenant the same id, or a
+  // surviving session cookie points at a tenant that no longer exists.
+  const id = stableId("seed-tenant", seed.slug);
   run(
     `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
@@ -71,7 +73,7 @@ async function upsertPeople(tenantBySlug: Record<string, TenantView>) {
     run(
       `INSERT INTO people (id, tenant_id, email, name, role, password_hash, active, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-      [randomUUID(), tenantId, person.email, person.name, person.role, hash, new Date().toISOString()],
+      [stableId("seed-person", person.email), tenantId, person.email, person.name, person.role, hash, new Date().toISOString()],
     );
   }
 }

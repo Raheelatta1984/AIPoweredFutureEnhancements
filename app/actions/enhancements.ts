@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { recordAudit } from "../../lib/audit.ts";
 import { deleteEnhancement, getEnhancementForTenant, incrementVotes, moveStatus, regenerateVaultFile } from "../../lib/enhancements.ts";
 import { isStatus, type Status } from "../../lib/rules.ts";
-import { currentUser } from "../../lib/session.ts";
+import { requireUserAction } from "../../lib/session.ts";
 
 export type ActionResult = { ok: boolean; message?: string };
 
@@ -18,8 +18,9 @@ function revalidateAll() {
 
 /** Demand signal. Editor-gated on the server; the UI hides it from viewers. */
 export async function voteAction(formData: FormData): Promise<ActionResult> {
-  const user = await currentUser();
-  if (!user) return { ok: false, message: "Sign in first." };
+  const guard = await requireUserAction();
+  if (!guard.user) return { ok: false, message: guard.error };
+  const user = guard.user;
   if (!user.tenantId) return { ok: false, message: "No tenant selected." };
   if (!user.canEdit) return { ok: false, message: "Viewers can see the demand count but cannot vote." };
 
@@ -32,8 +33,9 @@ export async function voteAction(formData: FormData): Promise<ActionResult> {
 
 /** Moves a record through the lifecycle; Building publishes the handover first. */
 export async function setStatusAction(formData: FormData): Promise<ActionResult> {
-  const user = await currentUser();
-  if (!user) return { ok: false, message: "Sign in first." };
+  const guard = await requireUserAction();
+  if (!guard.user) return { ok: false, message: guard.error };
+  const user = guard.user;
   if (!user.tenantId) return { ok: false, message: "No tenant selected." };
   if (!user.canEdit) return { ok: false, message: "Your role cannot change status." };
 
@@ -53,8 +55,10 @@ export async function setStatusAction(formData: FormData): Promise<ActionResult>
 }
 
 export async function regenerateAction(formData: FormData): Promise<ActionResult> {
-  const user = await currentUser();
-  if (!user?.tenantId) return { ok: false, message: "Sign in first." };
+  const guard = await requireUserAction();
+  if (!guard.user) return { ok: false, message: guard.error };
+  const user = guard.user;
+  if (!user.tenantId) return { ok: false, message: "Select a tenant first." };
   if (!user.canEdit) return { ok: false, message: "Your role cannot regenerate files." };
   const id = String(formData.get("id") ?? "");
   const path = regenerateVaultFile(id, user.tenantId, user.person.email);
@@ -65,8 +69,10 @@ export async function regenerateAction(formData: FormData): Promise<ActionResult
 }
 
 export async function deleteEnhancementAction(formData: FormData): Promise<ActionResult> {
-  const user = await currentUser();
-  if (!user?.tenantId) return { ok: false, message: "Sign in first." };
+  const guard = await requireUserAction();
+  if (!guard.user) return { ok: false, message: guard.error };
+  const user = guard.user;
+  if (!user.tenantId) return { ok: false, message: "Select a tenant first." };
   if (!user.canEdit) return { ok: false, message: "Your role cannot delete proposals." };
   const id = String(formData.get("id") ?? "");
   const existing = getEnhancementForTenant(id, user.tenantId);
@@ -80,8 +86,10 @@ export async function deleteEnhancementAction(formData: FormData): Promise<Actio
 
 /** Downloads a vault file as an attachment (kept server-side so paths stay private). */
 export async function downloadVaultAction(formData: FormData) {
-  const user = await currentUser();
-  if (!user?.tenantId) redirect("/login");
+  const guard = await requireUserAction();
+  if (!guard.user) redirect("/login");
+  const user = guard.user;
+  if (!user.tenantId) redirect("/login");
   const id = String(formData.get("id") ?? "");
   const existing = getEnhancementForTenant(id, user.tenantId);
   if (!existing) redirect("/vault");
