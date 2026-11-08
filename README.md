@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (76 tests) |
+| `npm test` | `node:test` + `tsx` suite (81 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -248,7 +248,9 @@ An admin opens **/tenants** and finds two panels:
    `docs/enhancements` handover folder) and nothing else — the consuming repository still
    needs no code, no workflow and no deploy.
 
-If the list is empty, the panel says why: no token in use, a token without the `repo` scope,
+The panel opens with **Test connection**, which reports the account and the *number* of
+repositories the token can see — `8` where you expect `21` is the signature of a fine-grained
+token scoped to selected repos. If the list is empty, the panel says why: no token in use, a token without the `repo` scope,
 or an empty `GITHUB_TOKEN` variable in your hosting settings overriding the stored one. On a
 serverless host a stored token lives in `/tmp`, so it is lost on the next cold start — set the
 environment variable for a lasting connection.

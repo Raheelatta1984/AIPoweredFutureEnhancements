@@ -25,7 +25,7 @@ const { count, run, setting } = await import("../lib/db.ts");
 const { ensureSeed, resetBootstrap } = await import("../lib/bootstrap.ts");
 const { seed } = await import("../scripts/seed.ts");
 const { findPersonByEmail, verifyPassword } = await import("../lib/auth.ts");
-const { clearGithubToken, resolveGithubToken, storeGithubToken, tokenState } = await import(
+const { clearGithubToken, resolveGithubToken, storeGithubToken, tokenSource, tokenState } = await import(
   "../lib/github-credentials.ts"
 );
 const { githubConfigured, normaliseDir, parseRepoLines, splitRepo } = await import("../lib/github.ts");
@@ -248,4 +248,57 @@ test("listing without a token explains the credential requirement", async () => 
   assert.equal(listed.repos.length, 0);
   assert.equal(listed.source, "none");
   assert.match(listed.error ?? "", /Paste one on \/tenants|GITHUB_TOKEN/);
+});
+
+/* ------------------------------------------------------- credential diagnosis */
+
+test("an empty GITHUB_TOKEN is reported as its own cause, not 'no token'", () => {
+  clearGithubToken();
+  process.env.GITHUB_TOKEN = "   ";
+  try {
+    const source = tokenSource();
+    assert.equal(source.ok, false);
+    assert.equal(source.kind, "env-empty");
+    assert.match(source.detail, /exists in the environment but is empty/);
+    assert.match(source.detail, /overrides anything stored/);
+  } finally {
+    delete process.env.GITHUB_TOKEN;
+  }
+});
+
+test("a missing variable and a missing stored token read as 'none'", () => {
+  delete process.env.GITHUB_TOKEN;
+  clearGithubToken();
+  const source = tokenSource();
+  assert.equal(source.ok, false);
+  assert.equal(source.kind, "none");
+  assert.match(source.detail, /Paste one above|GITHUB_TOKEN/);
+});
+
+test("a rotated SESSION_SECRET is distinguished from never having a token", () => {
+  storeGithubToken("ghp_storedBeforeRotation1234567890");
+  const before = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "a-different-secret-after-rotation-32ch";
+  try {
+    const source = tokenSource();
+    assert.equal(source.ok, false);
+    assert.equal(source.kind, "stored-undecryptable");
+    assert.match(source.detail, /SESSION_SECRET changed/);
+  } finally {
+    process.env.SESSION_SECRET = before;
+  }
+  const restored = tokenSource();
+  assert.equal(restored.ok, true);
+  assert.equal(restored.kind, "stored");
+});
+
+test("a working env token is reported as 'env', and beats a stored one", () => {
+  storeGithubToken("ghp_storedTokenThatShouldBeIgnored123");
+  process.env.GITHUB_TOKEN = "ghp_envTokenInUse1234567890abcd";
+  try {
+    assert.equal(tokenSource().kind, "env");
+  } finally {
+    delete process.env.GITHUB_TOKEN;
+    clearGithubToken();
+  }
 });

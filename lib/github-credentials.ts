@@ -83,6 +83,52 @@ export function storeGithubToken(token: string): { ok: boolean; error?: string }
   return { ok: true };
 }
 
+/**
+ * Operator-facing diagnosis of *why* no token is in play.
+ *
+ * "No token" is not one condition. An empty-but-present GITHUB_TOKEN reads as absent,
+ * a rejected token reads as absent, and a token encrypted under a previous
+ * SESSION_SECRET cannot be decrypted — all three used to render the same blank space.
+ * This separates them so the admin page can name the actual cause.
+ */
+export type TokenSource =
+  | { kind: "env"; ok: true }
+  | { kind: "env-empty"; ok: false; detail: string }
+  | { kind: "stored"; ok: true; hint: string }
+  | { kind: "stored-undecryptable"; ok: false; detail: string }
+  | { kind: "none"; ok: false; detail: string };
+
+export function tokenSource(): TokenSource {
+  const raw = process.env.GITHUB_TOKEN;
+  if (raw !== undefined && raw.trim() !== "") return { kind: "env", ok: true };
+  if (raw !== undefined && raw.trim() === "") {
+    return {
+      kind: "env-empty",
+      ok: false,
+      detail:
+        "GITHUB_TOKEN exists in the environment but is empty, so it is treated as unset and it overrides anything stored here. Set a value or delete the variable.",
+    };
+  }
+  const stored = setting(SETTING_KEY);
+  if (!stored) {
+    return {
+      kind: "none",
+      ok: false,
+      detail: "No GitHub token is configured. Paste one above, or set GITHUB_TOKEN in your hosting settings.",
+    };
+  }
+  const plain = decrypt(stored);
+  if (!plain) {
+    return {
+      kind: "stored-undecryptable",
+      ok: false,
+      detail:
+        "A stored token exists but cannot be decrypted — SESSION_SECRET changed since it was saved. Paste the token again.",
+    };
+  }
+  return { kind: "stored", ok: true, hint: `…${plain.slice(-4)}` };
+}
+
 export function clearGithubToken(): void {
   if (!dbWritable()) return;
   setSetting(SETTING_KEY, "");

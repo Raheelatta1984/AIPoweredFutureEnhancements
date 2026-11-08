@@ -462,3 +462,28 @@ export async function connectReposAction(_prev: AdminState, formData: FormData):
     message: `Connected ${connected.length} project${connected.length === 1 ? "" : "s"} → ${handoverDir}/: ${connected.join(", ")}${extras ? ` (${extras})` : ""}`,
   };
 }
+
+/** "Test connection" — proves the token works without changing any data. */
+export async function testGithubConnectionAction(_prev: AdminState, _formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can test the GitHub connection." };
+
+  const { checkGithubConnection } = await import("../../lib/github.ts");
+  const { tokenSource } = await import("../../lib/github-credentials.ts");
+  const source = tokenSource();
+  if (!source.ok) return { error: source.detail };
+
+  const check = await checkGithubConnection();
+  recordAudit({
+    tenantId: user.tenantId,
+    actor: user.person.email,
+    action: check.ok ? "github.connection_ok" : "github.connection_failed",
+    subject: "settings",
+    meta: { login: check.login ?? null, repoCount: check.repoCount ?? null, error: check.error ?? null },
+  });
+  if (!check.ok) return { error: `GitHub check failed: ${check.error ?? "unknown error"}` };
+  return {
+    ok: true,
+    message: `Connected as ${check.login ?? "an account"} — ${check.repoCount ?? 0} repositories visible to this token.`,
+  };
+}

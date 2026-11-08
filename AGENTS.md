@@ -129,6 +129,14 @@ the reasoning; this file is the checklist.
     HTTP server and asserts the exact request GitHub would receive (path, commit message,
     document body). Point that variable at the stand-in; never mock `fetch` globally.
 
+39. **"No token" is several different conditions.** `tokenSource()` separates an empty
+    `GITHUB_TOKEN` (present, blank, and overriding stored tokens), a never-configured hub, and
+    ciphertext that a rotated `SESSION_SECRET` can no longer decrypt. Never collapse them into
+    one blank state — an operator cannot act on "nothing here".
+40. **Do not present tenant cards as if they were repositories.** `/login` lists tenants (apps
+    already served); the GitHub project picker is admin-only on `/tenants`. Both screens say
+    what they are, and `/tenants` puts the GitHub panels *above* the tenant list.
+
 ## Verification before you push
 
 ```bash

@@ -174,3 +174,19 @@ test("clearing the token stops publishing immediately", async () => {
   assert.equal(moved.ok, false);
   assert.match(moved.error ?? "", /no GitHub token is configured/i);
 });
+
+test("checkGithubConnection reports the account and the exact repo count", async () => {
+  storeGithubToken("ghp_connectionCheckToken1234567890ab");
+  const { checkGithubConnection } = await import("../lib/github.ts");
+  const check = await checkGithubConnection();
+  assert.equal(check.ok, true);
+  assert.equal(check.login, "probe-user");
+  // The count matters: a fine-grained token scoped to a few repos looks identical to a
+  // broken setup unless the number is surfaced.
+  assert.equal(check.repoCount, 1);
+
+  clearGithubToken();
+  const none = await checkGithubConnection();
+  assert.equal(none.ok, false);
+  assert.match(none.error ?? "", /No token configured|not configured|No GitHub token/i);
+});
