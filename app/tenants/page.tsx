@@ -4,7 +4,7 @@ import { isEphemeralDatabase } from "../../lib/db.ts";
 import { requireAdmin } from "../../lib/session.ts";
 import { catalogueFor, listTenants } from "../../lib/tenants.ts";
 import { githubConfigured, listRepos } from "../../lib/github.ts";
-import { tokenState } from "../../lib/github-credentials.ts";
+import { tokenSource } from "../../lib/github-credentials.ts";
 import { GithubConnectPanel } from "./GithubConnectPanel.tsx";
 import { TenantForm } from "./TenantForm.tsx";
 
@@ -17,11 +17,11 @@ export default async function TenantsPage() {
 
   // Discovery is best-effort: without a token (or with a bad one) the panel still
   // renders and explains itself rather than 500-ing the admin page.
-  const state = tokenState();
+  const source = tokenSource();
   const connectedRepos = new Set(tenants.map((t) => t.github_repo.toLowerCase()).filter(Boolean));
   const listed = live
     ? await listRepos(connectedRepos)
-    : { ok: false, repos: [], error: undefined, source: state.state };
+    : { ok: false, repos: [], error: undefined, source: "none" as const };
 
   return (
     <AppShell user={user} active="tenants" ephemeral={isEphemeralDatabase()}>
@@ -38,6 +38,23 @@ export default async function TenantsPage() {
       </PageHead>
 
       <div className="stack">
+        <GithubConnectPanel
+          tokenState={source.ok ? (source.kind === "env" ? "env" : "stored") : "none"}
+          tokenHint={source.ok && "hint" in source ? source.hint : null}
+          repos={listed.repos}
+          listError={listed.error}
+          source={listed.source}
+          ephemeral={isEphemeralDatabase()}
+          sourceDetail={source.ok ? undefined : source.detail}
+        />
+
+        <div className="row tight" style={{ marginTop: 4 }}>
+          <h2 style={{ fontSize: 16 }}>Connected tenants</h2>
+          <span className="sid">sec.tenants-list</span>
+          <span className="tag">{tenants.length}</span>
+          <span className="tiny dim">apps this hub already serves — each one came from a repository above</span>
+        </div>
+
         <div className="grid cols-2">
           {tenants.map((tenant) => {
             const catalogue = catalogueFor(tenant.id);
@@ -81,15 +98,6 @@ export default async function TenantsPage() {
             );
           })}
         </div>
-
-        <GithubConnectPanel
-          tokenState={state.state}
-          tokenHint={state.hint}
-          repos={listed.repos}
-          listError={listed.error}
-          source={listed.source}
-          ephemeral={isEphemeralDatabase()}
-        />
 
         <Card title="Add a tenant manually" sid="sec.tenants-new">
           <p className="tiny dim" style={{ marginBottom: 12 }}>

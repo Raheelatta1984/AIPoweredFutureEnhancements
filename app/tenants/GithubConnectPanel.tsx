@@ -1,4 +1,9 @@
-import { connectRepoAction, connectReposAction, saveGithubTokenAction } from "../actions/admin.ts";
+import {
+  connectRepoAction,
+  connectReposAction,
+  saveGithubTokenAction,
+  testGithubConnectionAction,
+} from "../actions/admin.ts";
 import type { GithubRepo } from "../../lib/github.ts";
 import { Notice } from "../../components/ui.tsx";
 import { ActionForm, SubmitButton } from "./ActionForm.tsx";
@@ -16,6 +21,7 @@ export function GithubConnectPanel({
   listError,
   source,
   ephemeral,
+  sourceDetail,
 }: {
   tokenState: "env" | "stored" | "none";
   tokenHint: string | null;
@@ -23,6 +29,8 @@ export function GithubConnectPanel({
   listError?: string;
   source: "env" | "stored" | "none";
   ephemeral: boolean;
+  /** Specific reason when no usable token exists (empty env var, rotated secret, …). */
+  sourceDetail?: string;
 }) {
   const connected = repos.filter((repo) => repo.connected);
   const available = repos.filter((repo) => !repo.connected);
@@ -49,6 +57,22 @@ export function GithubConnectPanel({
           GitHub → Settings → Developer settings → Personal access tokens. It is encrypted with a key derived from{" "}
           <span className="mono">SESSION_SECRET</span> before being stored.
         </p>
+
+        <ActionForm action={testGithubConnectionAction} className="row tight" style={{ marginBottom: 10 }}>
+          <SubmitButton className="btn-sm" pendingLabel="Checking GitHub…">
+            Test connection
+          </SubmitButton>
+          <span className="tiny dim">
+            Asks GitHub who this token belongs to and how many repositories it can see.
+          </span>
+        </ActionForm>
+
+        {tokenState === "none" && sourceDetail ? (
+          <div className="notice warn" role="alert">
+            <span className="icon">!</span>
+            <div>{sourceDetail}</div>
+          </div>
+        ) : null}
 
         {tokenState === "env" ? (
           <Notice tone="info">

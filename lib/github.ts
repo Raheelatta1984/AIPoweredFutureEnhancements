@@ -352,3 +352,27 @@ export function parseRepoLines(
   }
   return { valid, invalid };
 }
+
+export type GithubCheck = {
+  /** Can the hub reach GitHub and authenticate at all? */
+  ok: boolean;
+  login?: string;
+  /** How many repositories this token can see. */
+  repoCount?: number;
+  error?: string;
+};
+
+/**
+ * One call that answers "is my GitHub connection working?" for the admin UI.
+ *
+ * Deliberately reports the count rather than just pass/fail: 8 instead of 21 is the
+ * signature of a fine-grained token scoped to selected repositories, which otherwise
+ * looks identical to a fully working setup.
+ */
+export async function checkGithubConnection(): Promise<GithubCheck> {
+  const who = await verifyToken();
+  if (!who.ok) return { ok: false, error: who.error ?? "GitHub did not accept the token." };
+  const listed = await listRepos();
+  if (!listed.ok) return { ok: false, login: who.login, error: listed.error ?? "Repository listing failed." };
+  return { ok: true, login: who.login, repoCount: listed.repos.length };
+}

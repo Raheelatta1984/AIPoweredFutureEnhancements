@@ -38,6 +38,11 @@ export default async function LoginPage() {
             stable-ID catalogue and keyword map, and it can capture proposals immediately. Approved handovers are
             published into the consuming repository as Markdown, where git becomes the durable record.
           </p>
+          <div className="row tight" style={{ marginBottom: 2 }}>
+            <span className="small strong">Connected tenants</span>
+            <span className="sid">sec.login.tenants</span>
+            <span className="tiny dim">apps this hub already serves — not your GitHub repositories</span>
+          </div>
           <div className="grid cols-2" style={{ gap: 10 }}>
             {tenants.map((tenant) => (
               <div key={tenant.id} className="card flat" style={{ padding: 12 }}>
@@ -51,6 +56,14 @@ export default async function LoginPage() {
                 </div>
               </div>
             ))}
+          </div>
+          <div className="notice info" role="note">
+            <span className="icon">i</span>
+            <div>
+              <strong>Looking for your GitHub projects?</strong> Sign in as an admin (Amara) and open{" "}
+              <span className="mono">/tenants</span> — the repository picker lives there, behind authentication, because
+              it needs the hub&apos;s GitHub token. It cannot be shown on this public page.
+            </div>
           </div>
           <div className="tiny dim">
             Local, deterministic drafting — no model calls, so proposal text never leaves this server.
