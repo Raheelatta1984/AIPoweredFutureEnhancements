@@ -51,6 +51,7 @@ export default async function TenantsPage() {
     <AppShell user={user} active="tenants" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.tenants"
+        user={user}
         title="Tenants"
         subtitle="A tenant is a connected application, stored as data only. Adding one here is the whole integration on the hub side — the consuming repository needs no code, no CI and no deploy."
       >

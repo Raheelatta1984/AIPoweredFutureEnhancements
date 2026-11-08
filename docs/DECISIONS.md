@@ -284,3 +284,30 @@ Verified with two processes, not one: sign in → stop the server → delete the
 new process → replay the cookie. `/tenants` renders, the notice appears, adding a tenant works,
 and Test connection keeps working (the in-process version of that test is invalid — an open
 SQLite handle keeps serving rows from a file that was unlinked underneath it).
+
+## Why tenants were "visible in Overview but not in Studio, Vault or Handovers"
+
+They were: every one of those pages is scoped to `user.tenantId`, and the top-bar switcher
+rendered the same two tenants on all seven routes (verified by fetching each route and reading
+the markup). What differed was **how obvious it was**. Overview's title *was* the tenant name,
+so the context could not be missed. Everywhere else the tenant appeared only in the top bar,
+which on a phone wraps and scrolls away — and the top bar is also where an admin, having just
+added a tenant on `/tenants`, is least likely to look.
+
+The fix is presentation, and it is one component: `TenantContext` in `components/Shell.tsx`,
+rendered by `PageHead` under the title on every page. It shows the active tenant as a coloured
+chip, offers the others as one-click switches for accounts that may switch (`canSwitchTenant`
+is unchanged — a tenant-bound person still sees exactly one tenant and no switch), and says
+which action to take when nothing is selected. Overview's title became "Overview" so the tenant
+is named in the same place as on every other tab.
+
+Two traps worth recording:
+
+* **A `<select>` is not a tenant list on a phone.** It renders one line and the rest is behind a
+  native picker; a screenshot of it looks like "only one tenant exists".
+* **Server actions ignore a POST without `Origin`.** `switchTenantAction` correctly redirected
+  but changed nothing when driven by a harness that omitted the header; a browser always sends
+  it. If a harness reports that a switch "does nothing", add `Origin` before changing code.
+
+The regression test is structural on purpose: `tests/github.test.mts` asserts that every page
+passes `user` to `PageHead`, so a new tab cannot quietly lose the context again.

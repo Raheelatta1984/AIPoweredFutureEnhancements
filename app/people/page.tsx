@@ -19,6 +19,7 @@ export default async function PeoplePage() {
     <AppShell user={user} active="people" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.people"
+        user={user}
         title="People & roles"
         subtitle="Rank order: viewer < editor < manager < exec < admin. Editors submit, vote and move stages; managers see the audit trail; hub-level execs/admins can switch tenants. A person is only visible to the tenants they belong to."
       />

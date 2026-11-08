@@ -128,6 +128,29 @@ pre {
 .page-head .sub { color: var(--muted); font-size: 13.5px; max-width: 72ch; }
 .page-head .spacer { flex: 1; }
 
+/* Which tenant is this tab scoped to? Present on every page, not just the overview. */
+.tenant-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.tenant-context .sid { display: none; }
+.tenant-context form { display: inline-flex; }
+.tenant-chip {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.tenant-chip:hover { color: var(--text); border-color: rgba(91, 140, 255, 0.6); background: var(--accent-soft); }
+
 /* --------------------------------------------------------------- primitives */
 
 .card {

@@ -17,6 +17,7 @@ export default async function StudioPage() {
     <AppShell user={user} active="studio" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.studio"
+        user={user}
         title="Studio"
         subtitle="Describe the change in your own words. The local drafting engine proposes 2–3 options for each field — grounded only in this tenant's areas, keyword map and stable-ID catalogue. Nothing leaves this server."
       />
