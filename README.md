@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (37 tests) |
+| `npm test` | `node:test` + `tsx` suite (47 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
