@@ -25,7 +25,8 @@ export default async function OverviewPage() {
     <AppShell user={user} active="overview" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.overview"
-        title={tenant ? `${tenant.name}` : "No tenant selected"}
+        user={user}
+        title="Overview"
         subtitle={
           tenant
             ? tenant.description

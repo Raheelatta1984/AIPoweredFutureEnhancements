@@ -30,6 +30,7 @@ export default async function VaultPage({ searchParams }: { searchParams: Search
     <AppShell user={user} active="vault" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.vault"
+        user={user}
         title="Vault"
         subtitle="Every proposal is mirrored to Markdown on disk — vault/<tenant>/ENH-XXXX-title.md, with archived records moved into archive/. Git is the durable record; the database is the working cache."
       >

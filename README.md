@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (97 tests) |
+| `npm test` | `node:test` + `tsx` suite (99 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -274,6 +274,11 @@ every cold start, so a cookie minted ten minutes ago can reach an instance that 
 seen the person or the session row. Seeded identities are derived (`stableId`), a missing
 session row is not treated as a revocation, and every action that needs a role says *which*
 failure happened — an expired cookie reads "sign in again", not "only hub admins can …".
+
+**Every tab names its tenant.** The active tenant sits directly under the page title
+(`sec.tenant-context`), with the other tenants as one-click switches for hub-level accounts —
+the overview used to be the only screen where the tenant was obvious, because its title *was*
+the tenant name.
 
 The **tenant switcher** in the top bar lists connected tenants only — never repositories. If a
 project is missing there, it has not been connected yet; connect it on `/tenants` and it appears.

@@ -107,15 +107,71 @@ export function TopBar({ user, active, ephemeral }: { user: SessionUser; active:
   );
 }
 
+/**
+ * "Which tenant am I looking at?" — answered the same way on every tab.
+ *
+ * For hub-level accounts it also lists the other tenants as links, because a switcher you
+ * have to find first reads as a missing tenant list.
+ */
+export function TenantContext({ user }: { user: SessionUser }) {
+  const active = user.tenants.find((t) => t.id === user.tenantId) ?? null;
+  const others = user.tenants.filter((t) => t.id !== user.tenantId);
+  if (!active) {
+    return (
+      <div className="tenant-context" data-tenant-context="none">
+        <span className="sid">sec.tenant-context</span>
+        <span className="tag rose">no tenant selected</span>
+        <span className="tiny dim">
+          {user.canAdmin ? "Pick one with the switcher in the top bar." : "Ask a hub admin to link your account to a tenant."}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="tenant-context" data-tenant-context={active.slug}>
+      <span className="sid">sec.tenant-context</span>
+      <span className="tag" style={{ borderColor: `${active.colour}66`, color: active.colour }} title={active.github_repo || "no repository linked"}>
+        <span className="badge-dot" style={{ background: active.colour }} />
+        {active.name}
+      </span>
+      {user.tenants.length > 1 ? (
+        <span className="row tight" style={{ gap: 6 }}>
+          <span className="tiny dim">switch to</span>
+          {others.map((tenant) => (
+            <form key={tenant.id} action={switchTenantAction}>
+              <input type="hidden" name="tenant_id" value={tenant.id} />
+              <button type="submit" className="tenant-chip" title={`Open ${tenant.name}`}>
+                {tenant.name}
+              </button>
+            </form>
+          ))}
+        </span>
+      ) : (
+        <span className="tiny dim">{user.canSwitchTenant ? "only tenant" : "your tenant"}</span>
+      )}
+    </div>
+  );
+}
+
 export function PageHead({
   title,
   sid,
   subtitle,
+  user,
   children,
 }: {
   title: string;
   sid: string;
   subtitle?: string;
+  /**
+   * When given, the page names the tenant it is scoped to, right under the title.
+   *
+   * The context used to live only in the top bar, so on a phone (where the bar wraps or
+   * scrolls away) a tab looked like it had lost the tenant — the overview shows one because
+   * its *title* is the tenant name. Naming it on every tab removes the guesswork, and the
+   * switcher stays available where the eye already is.
+   */
+  user?: SessionUser;
   children?: React.ReactNode;
 }) {
   return (
@@ -125,6 +181,7 @@ export function PageHead({
           <h1>{title}</h1>
           <StableId id={sid} />
         </div>
+        {user ? <TenantContext user={user} /> : null}
         {subtitle ? <p className="sub">{subtitle}</p> : null}
       </div>
       <div className="spacer" />

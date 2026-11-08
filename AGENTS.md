@@ -159,6 +159,13 @@ the reasoning; this file is the checklist.
     and a *missing* sessions row is trusted while a row that exists and is revoked is not
     (`isSessionActive`). `resolveSessionDetailed().reverified` lets `/tenants` say so.
 
+43. **Every page names its tenant.** `PageHead` takes `user` and renders `TenantContext`
+    (`sec.tenant-context`): the active tenant plus one-click switches for accounts that may
+    switch. The overview used to be the only tab where the tenant was visible, because its
+    title was the tenant name, so the other tabs read as "my tenants are missing". Never add
+    a page under `AppShell` without passing `user` to `PageHead`; `tests/github.test.mts`
+    fails if one forgets. A tenant-bound account is never offered another tenant.
+
 ## Verification before you push
 
 ```bash

@@ -33,6 +33,7 @@ export default async function AuditPage() {
     <AppShell user={user} active="audit" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.audit"
+        user={user}
         title="Audit trail"
         subtitle="Every write records an event: submissions, publishes, refusals, status moves, votes, syncs, admin changes and sign-ins. Manager role or above — everyone else gets a 404."
       />

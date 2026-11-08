@@ -339,3 +339,41 @@ test("the seeded demo identities are derivable, so a rebuilt database matches an
   assert.equal(new Set(ids).size, ids.length, "no two seeded rows share an id");
   assert.equal(stableId("seed-person", SEED_PEOPLE[0].email), ids[0], "derivation is pure");
 });
+
+/* --------------------------------------------- tenant context on every tab */
+
+/**
+ * "I can see tenants in the overview but not in studio, vault, handovers…"
+ *
+ * The overview names the tenant because its *title* was the tenant name; every other tab
+ * showed the tenant only in the top bar, which on a phone scrolls away. The context now
+ * sits under each page title, so this asserts it cannot silently drop off a new page.
+ */
+test("every page names its tenant context under the title", () => {
+  const pages = [
+    "../app/page.tsx",
+    "../app/studio/page.tsx",
+    "../app/vault/page.tsx",
+    "../app/handovers/page.tsx",
+    "../app/tenants/page.tsx",
+    "../app/people/page.tsx",
+    "../app/audit/page.tsx",
+  ];
+  for (const page of pages) {
+    const source = readFileSync(new URL(page, import.meta.url), "utf8");
+    assert.match(source, /<PageHead[\s\S]*?user=\{user\}/, `${page} must pass user to PageHead`);
+    assert.match(source, /<AppShell user=\{user\}/, `${page} must render inside the shell`);
+  }
+});
+
+test("the tenant context names the active tenant and offers the others", () => {
+  const shell = readFileSync(new URL("../components/Shell.tsx", import.meta.url), "utf8");
+  assert.match(shell, /export function TenantContext/, "the strip lives in one place");
+  assert.match(shell, /data-tenant-context=/, "tests and operators can inspect the active tenant");
+  assert.match(shell, /sec\.tenant-context/, "it carries a stable ID like every other region");
+  // Switching must be possible from the page itself, not only the top bar.
+  assert.match(shell, /switchTenantAction/, "the strip submits the real switch action");
+  // A tenant-bound account must never be offered another tenant.
+  assert.match(shell, /user\.tenants\.length > 1/);
+  assert.match(shell, /others\.map/);
+});

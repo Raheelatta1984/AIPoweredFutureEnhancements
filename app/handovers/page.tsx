@@ -42,6 +42,7 @@ export default async function HandoversPage() {
     <AppShell user={user} active="handovers" ephemeral={isEphemeralDatabase()}>
       <PageHead
         sid="tab.handovers"
+        user={user}
         title="Handovers"
         subtitle="Durable repo-side documents. Moving a proposal to Building publishes ENH-#### into the consuming repository's handover folder; a merged PR with a Handover: line moves it to archived/ and the next sync stamps it Archived here."
       >
