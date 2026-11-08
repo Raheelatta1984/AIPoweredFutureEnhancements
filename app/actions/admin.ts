@@ -383,12 +383,18 @@ export async function connectReposAction(_prev: AdminState, formData: FormData):
 
   const { parseRepoLines, listRepos } = await import("../../lib/github.ts");
   const { diagnoseRepoListing } = await import("../../lib/repo-discovery.ts");
-  const parsed = parseRepoLines(String(formData.get("repos") ?? ""));
+  // Two ways in: ticked checkboxes from the project list, or a pasted list. Ticked wins
+  // when both are present, because ticking is the more deliberate of the two acts.
+  const ticked = formData
+    .getAll("repo")
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+  const parsed = ticked.length > 0 ? { valid: [...new Set(ticked)], invalid: [] } : parseRepoLines(String(formData.get("repos") ?? ""));
   if (parsed.valid.length === 0) {
     return {
       error: parsed.invalid.length
         ? `None of those look like "owner/repo": ${parsed.invalid.slice(0, 5).join(", ")}`
-        : "Paste at least one repository, one per line.",
+        : "Tick at least one project, or paste repositories one per line.",
     };
   }
 
@@ -543,4 +549,97 @@ export async function cancelGithubReposAction(_prev: AdminState, _formData: Form
   jar.delete(REPOS_COOKIE);
   revalidatePath("/tenants");
   return { ok: true, message: "Project list hidden. Press “Load my projects” to fetch it again." };
+}
+
+/**
+ * "Connect these N projects" — the checkbox path next to the repository list.
+ *
+ * A thin wrapper over `connectReposAction` so the project list can post an unlimited
+ * selection of checkboxes instead of a fixed `<select>`, while both paths share one
+ * validated implementation (nothing is created for a repository the token cannot see).
+ */
+export async function connectSelectedReposAction(prev: AdminState, formData: FormData): Promise<AdminState> {
+  return connectReposAction(prev, formData);
+}
+
+/**
+ * "Expand the switcher" — connect EVERY repository the token can see as a tenant.
+ *
+ * The demo hub starts with two tenants, and the top-bar switcher (which only lists
+ * tenants) was read as "the project list is missing a lot of repositories". This is the
+ * one-click answer for someone who wants the whole account represented, not a manual
+ * pass over twenty checkboxes. Repositories already connected are skipped, and the
+ * preview is required so a mis-scoped token cannot silently create fifty tenants.
+ */
+export async function connectAllVisibleReposAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
+  if (String(formData.get("confirm") ?? "") !== "1") {
+    return { error: "Tick “I understand this creates one tenant per repository” first." };
+  }
+
+  const { listRepos } = await import("../../lib/github.ts");
+  const { diagnoseRepoListing } = await import("../../lib/repo-discovery.ts");
+  const listed = await listRepos();
+  if (!listed.ok) return { error: listed.error ?? "Could not read the repository list." };
+
+  const handoverDir = (String(formData.get("handover_dir") ?? "").trim() || "docs/enhancements").replace(
+    /^\/+|\/+$/g,
+    "",
+  );
+  const tenants = listTenants();
+  const taken = new Set(tenants.map((t) => t.github_repo.toLowerCase()).filter(Boolean));
+  let slugs = tenants.map((t) => t.slug);
+
+  const connected: string[] = [];
+  for (const repo of listed.repos) {
+    const key = repo.fullName.toLowerCase();
+    if (taken.has(key)) continue;
+    const name = repo.name.replace(/[-_]/g, " ");
+    const slug = tenantSlugFrom(name, slugs);
+    slugs = [...slugs, slug];
+    run(
+      `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      [
+        randomUUID(),
+        slug,
+        name,
+        repo.description ?? `Connected from ${repo.fullName}.`,
+        repo.fullName,
+        handoverDir,
+        JSON.stringify(["General"]),
+        JSON.stringify({}),
+        "#5b8cff",
+        100 + slugs.length,
+        new Date().toISOString(),
+      ],
+    );
+    taken.add(key);
+    connected.push(repo.fullName);
+  }
+
+  recordAudit({
+    tenantId: user.tenantId,
+    actor: user.person.email,
+    action: "tenant.connect_all",
+    subject: "tenants",
+    after: { connected, handoverDir, visible: listed.repos.length },
+  });
+  revalidatePath("/tenants");
+  revalidatePath("/");
+  revalidatePath("/people");
+
+  if (connected.length === 0) {
+    const report = diagnoseRepoListing(listed);
+    const why =
+      listed.repos.length === 0
+        ? ` The token can see no repositories at all. ${report.detail}`
+        : " Every repository this token can see is already a tenant.";
+    return { error: `Nothing new was connected.${why}` };
+  }
+  return {
+    ok: true,
+    message: `Connected ${connected.length} project${connected.length === 1 ? "" : "s"} → ${handoverDir}/: ${connected.join(", ")}. Each one is now in the tenant switcher.`,
+  };
 }

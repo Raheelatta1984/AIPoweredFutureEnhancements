@@ -1,7 +1,8 @@
 import {
   cancelGithubReposAction,
-  connectRepoAction,
+  connectAllVisibleReposAction,
   connectReposAction,
+  connectSelectedReposAction,
   loadGithubReposAction,
   saveGithubTokenAction,
   testGithubConnectionAction,
@@ -161,6 +162,11 @@ export function GithubConnectPanel({
           tenant row — the consuming repo needs no code, no workflow and no deploy, and publishing simply commits a
           Markdown handover into its <span className="mono">docs/enhancements/</span> folder.
         </p>
+        <Notice tone="info">
+          The <strong>tenant switcher</strong> in the top bar lists connected tenants only — it is not a repository
+          picker. A repository appears there after you connect it here, and disappears from it only when you remove
+          the tenant.
+        </Notice>
 
         {!loaded ? (
           <div className="stack" style={{ gap: 10 }}>
@@ -209,36 +215,56 @@ export function GithubConnectPanel({
               </div>
             ) : (
               <>
-                <ActionForm action={connectRepoAction} className="stack" style={{ gap: 10 }}>
-                  <div className="field-row">
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label htmlFor="gh-repo">Repository</label>
-                      <select id="gh-repo" name="repo" defaultValue={available[0]?.fullName ?? ""} required>
-                        {available.length === 0 ? <option value="">All visible repositories are connected</option> : null}
-                        {available.map((repo) => (
-                          <option key={repo.fullName} value={repo.fullName}>
-                            {repo.fullName}
-                            {repo.private ? " (private)" : ""}
-                            {repo.archived ? " (archived)" : ""}
-                          </option>
-                        ))}
-                      </select>
+                <ActionForm action={connectSelectedReposAction} className="stack" style={{ gap: 10 }}>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Repositories to connect</label>
+                    <div className="grid cols-2" style={{ gap: 6 }}>
+                      {repos.map((repo) => (
+                        <label key={repo.fullName} className="row tight small" style={{ cursor: "pointer", gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            name="repo"
+                            value={repo.fullName}
+                            defaultChecked={false}
+                            disabled={repo.connected}
+                            style={{ width: "auto", minWidth: 0 }}
+                          />
+                          <span className={repo.connected ? "mono tiny dim" : "mono tiny"}>{repo.fullName}</span>
+                          {repo.connected ? <span className="tag mint">connected</span> : null}
+                        </label>
+                      ))}
                     </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
+                    <p className="tiny dim" style={{ margin: "6px 0 0" }}>
+                      Tick as many as you like. Each name is checked against your token before anything is created — a
+                      repository the token cannot see is refused, never half-connected.
+                    </p>
+                  </div>
+                  <div className="row tight">
+                    <div className="field" style={{ marginBottom: 0, maxWidth: 260 }}>
                       <label htmlFor="gh-dir">Handover folder</label>
                       <input id="gh-dir" name="handover_dir" defaultValue="docs/enhancements" placeholder="docs/enhancements" />
                     </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label htmlFor="gh-name">App name (optional)</label>
-                      <input id="gh-name" name="name" placeholder="defaults to the repo name" />
-                    </div>
-                  </div>
-                  <div className="row tight">
                     <SubmitButton className="btn-primary" pendingLabel="Connecting…" disabled={available.length === 0}>
-                      Connect as tenant
+                      Connect selected
                     </SubmitButton>
-                    <span className="tiny dim">Creates the tenant only; nothing is written to the repository yet.</span>
+                    <span className="tiny dim">Creates tenant rows only; nothing is written to the repositories yet.</span>
                   </div>
+                </ActionForm>
+
+                <ActionForm action={connectAllVisibleReposAction} className="stack" style={{ gap: 8 }}>
+                  <div className="row tight">
+                    <SubmitButton className="btn-sm" pendingLabel="Connecting everything…" disabled={available.length === 0}>
+                      Connect all {available.length} visible project{available.length === 1 ? "" : "s"}
+                    </SubmitButton>
+                    <label className="row tight tiny" style={{ cursor: "pointer", gap: 6 }}>
+                      <input type="checkbox" name="confirm" value="1" style={{ width: "auto", minWidth: 0 }} />
+                      I understand this creates one tenant per repository
+                    </label>
+                  </div>
+                  <span className="tiny dim">
+                    Best way to see your whole GitHub account in the switcher at once. Already-connected repositories are
+                    skipped; nothing is written to any repository until you publish a handover.
+                  </span>
                 </ActionForm>
 
                 {repos.length > 1 ? (

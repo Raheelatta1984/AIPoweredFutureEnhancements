@@ -140,7 +140,11 @@ the reasoning; this file is the checklist.
     own total, and names the cause (`scoped-token`, `no-token`, `truncated`, `failed`). The
     reported bug was exactly this: one repository shown, twenty expected, nothing said.
     Discovery also runs on request (the `feh_gh_repos` cookie), not during every page render.
-41. **Do not present tenant cards as if they were repositories.** `/login` lists tenants (apps
+41. **The tenant switcher is not a repository picker.** It lists connected tenants only, so
+    "my projects are missing from the dropdown" means "not connected yet", never "discovery is
+    broken". `/tenants` says this in the project panel, and offers **Connect all N visible
+    projects** (behind an explicit confirmation) for mirroring the whole account in one step.
+42. **Do not present tenant cards as if they were repositories.** `/login` lists tenants (apps
     already served); the GitHub project picker is admin-only on `/tenants`. Both screens say
     what they are, and `/tenants` puts the GitHub panels *above* the tenant list.
 

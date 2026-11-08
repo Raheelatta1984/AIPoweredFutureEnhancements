@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (89 tests) |
+| `npm test` | `node:test` + `tsx` suite (91 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -240,11 +240,12 @@ An admin opens **/tenants** and finds two panels:
 1. **GitHub connection** — paste a token with `Contents: read and write` (fine-grained) or
    `repo` (classic). It is verified against the API on save and encrypted at rest with a key
    derived from `SESSION_SECRET`. `GITHUB_TOKEN` from the environment always takes precedence.
-2. **Your GitHub projects** — every repository the token can see, with visibility, archived
-   state, last push and whether it is already a tenant. Pick one and click **Connect as
-   tenant**, or paste several (`owner/name`, one per line) to connect them in one go. Each
-   name is checked against the token first, so a typo is reported instead of creating a
-   tenant that can never publish. Connecting creates the tenant row (name, repo,
+2. **Your GitHub projects** — every repository the token can see, as cards with visibility,
+   archived state, last push and whether it is already a tenant. Tick as many as you like and
+   click **Connect selected**, paste a list (`owner/name`, one per line) in the collapsed bulk
+   form, or click **Connect all N visible projects** (with a confirmation) to mirror the whole
+   account into the hub at once. Each name is checked against the token first, so a typo is
+   reported instead of creating a tenant that can never publish. Connecting creates the tenant row (name, repo,
    `docs/enhancements` handover folder) and nothing else — the consuming repository still
    needs no code, no workflow and no deploy.
 
@@ -267,6 +268,9 @@ separate: no token in use, an empty `GITHUB_TOKEN` variable overriding a stored 
 without the `repo` scope, an organisation that has not granted access, and the 1000-repo page
 cap. On a serverless host a stored token lives in `/tmp`, so it is lost on the next cold start —
 set the environment variable for a lasting connection.
+
+The **tenant switcher** in the top bar lists connected tenants only — never repositories. If a
+project is missing there, it has not been connected yet; connect it on `/tenants` and it appears.
 
 Without a token the hub refuses every move to **Building** and says so — publishing is the
 gate, not a background nicety.
