@@ -69,6 +69,68 @@ function toBase64(content: string): string {
 
 export type RemoteDoc = { path: string; sha: string; htmlUrl?: string };
 
+/**
+ * How many repositories `/user/repos` *says* exist for this credential.
+ *
+ * The listed pages stop at 1000 by policy (see `listRepos`), and an operator looking at a
+ * short list needs to know whether the token is scoped or the list was truncated — two
+ * problems with completely different fixes. The `Link: rel="last"` header answers that
+ * without fetching every page.
+ */
+function totalFromLink(header: string | null, perPage: number): number | undefined {
+  if (!header) return undefined;
+  const last = /[?&]page=(\d+)[^>]*>;\s*rel="last"/.exec(header);
+  return last ? Number(last[1]) * perPage : undefined;
+}
+
+/** How many repositories a login publishes publicly — one request, `Link`-derived. */
+async function publicRepoCount(login: string): Promise<number | undefined> {
+  try {
+    const response = await fetch(`${apiBase()}/users/${encodeURIComponent(login)}/repos?per_page=1&sort=pushed`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "future-enhancements-hub",
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) return undefined;
+    const fromHeader = totalFromLink(response.headers.get("link"), 1);
+    if (fromHeader !== undefined) return fromHeader;
+    const page = (await response.json()) as unknown;
+    return Array.isArray(page) ? page.length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The account (and organisations) behind a token — used to explain a short list. */
+async function tokenIdentity(token: string): Promise<{ login?: string; orgs: string[] }> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "future-enhancements-hub",
+  };
+  try {
+    const [who, orgs] = await Promise.all([
+      fetch(`${apiBase()}/user`, { headers, cache: "no-store" }),
+      fetch(`${apiBase()}/user/orgs?per_page=100`, { headers, cache: "no-store" }),
+    ]);
+    const person = who.ok ? ((await who.json()) as { login?: unknown }) : null;
+    const list = orgs.ok ? ((await orgs.json()) as Array<{ login?: unknown }>) : [];
+    return {
+      login: typeof person?.login === "string" ? person.login : undefined,
+      orgs: Array.isArray(list)
+        ? list.map((org) => (typeof org.login === "string" ? org.login : "")).filter(Boolean)
+        : [],
+    };
+  } catch {
+    // Diagnosis is best-effort: never turn it into a listing failure.
+    return { orgs: [] };
+  }
+}
+
 async function getContent(config: GithubConfig & { token: string }, path: string, branch: string) {
   const { owner, name } = splitRepo(config.repo) ?? { owner: "", name: "" };
   const url = `${apiBase()}/repos/${owner}/${name}/contents/${encodeURI(path)}?ref=${encodeURIComponent(branch)}`;
@@ -206,6 +268,26 @@ export type RepoListResult = {
   error?: string;
   /** Which credential produced this list, for the UI to explain itself. */
   source: "env" | "stored" | "none";
+  /**
+   * The account behind the token, and the ones it *could* see but did not list.
+   *
+   * `/user/repos` only returns what the token actually has access to, so the
+   * difference between "you own ten repos" and "this list" is the only way an
+   * operator can tell a scoped token from an empty account.
+   */
+  owner?: string;
+  /** Logins the token is a member of (`/user/orgs`), for the same reason. */
+  organisations?: string[];
+  /** GitHub's own count for this credential when it exceeds the 1000-repo page cap. */
+  totalVisible?: number;
+  /**
+   * How many repositories `<owner>` publishes publicly (`/users/<owner>/repos`).
+   *
+   * This is the number an operator compares against their mental model ("I have twenty
+   * projects"). A token that lists one while the profile publishes twenty is scoped, not
+   * broken — and that is not visible from the repo list alone.
+   */
+  profilePublicCount?: number;
 };
 
 type RawRepo = {
@@ -240,8 +322,11 @@ export async function listRepos(connectedRepos: ReadonlySet<string> = new Set())
   }
 
   const repos: GithubRepo[] = [];
+  /** GitHub's own count for this credential, when the pagination header reports one. */
+  let total: number | undefined;
   try {
     // 100 per page, capped at 10 pages: a hub needing more than 1000 repos is out of scope.
+    // The cap is reported (never silent) — a truncated list looks exactly like a scoped token.
     for (let page = 1; page <= 10; page += 1) {
       const response = await fetch(
         `${apiBase()}/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`,
@@ -266,6 +351,7 @@ export async function listRepos(connectedRepos: ReadonlySet<string> = new Set())
               : `GitHub repository listing failed (${response.status}): ${detail}`,
         };
       }
+      if (page === 1) total = totalFromLink(response.headers.get("link"), 100);
       const pageJson = (await response.json()) as unknown;
       if (!Array.isArray(pageJson) || pageJson.length === 0) break;
       for (const raw of pageJson as RawRepo[]) {
@@ -296,7 +382,18 @@ export async function listRepos(connectedRepos: ReadonlySet<string> = new Set())
       error: `Could not reach GitHub: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  return { ok: true, repos, source };
+
+  const identity = await tokenIdentity(token);
+  const profilePublicCount = identity.login ? await publicRepoCount(identity.login) : undefined;
+  return {
+    ok: true,
+    repos,
+    source,
+    owner: identity.login,
+    organisations: identity.orgs,
+    totalVisible: total,
+    profilePublicCount,
+  };
 }
 
 /** Cheap credential check for the admin UI: does the token authenticate at all? */
@@ -360,19 +457,24 @@ export type GithubCheck = {
   /** How many repositories this token can see. */
   repoCount?: number;
   error?: string;
+  /** How many repositories the account publishes publicly, when it can be read. */
+  profilePublicCount?: number;
+  /** How many repositories GitHub counts for this credential, when it reports a total. */
+  totalVisible?: number;
+  organisations?: string[];
 };
 
-/**
- * One call that answers "is my GitHub connection working?" for the admin UI.
- *
- * Deliberately reports the count rather than just pass/fail: 8 instead of 21 is the
- * signature of a fine-grained token scoped to selected repositories, which otherwise
- * looks identical to a fully working setup.
- */
 export async function checkGithubConnection(): Promise<GithubCheck> {
   const who = await verifyToken();
   if (!who.ok) return { ok: false, error: who.error ?? "GitHub did not accept the token." };
   const listed = await listRepos();
   if (!listed.ok) return { ok: false, login: who.login, error: listed.error ?? "Repository listing failed." };
-  return { ok: true, login: who.login, repoCount: listed.repos.length };
+  return {
+    ok: true,
+    login: who.login,
+    repoCount: listed.repos.length,
+    profilePublicCount: listed.profilePublicCount,
+    totalVisible: listed.totalVisible,
+    organisations: listed.organisations,
+  };
 }

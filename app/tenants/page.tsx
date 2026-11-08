@@ -1,10 +1,14 @@
+import { cookies } from "next/headers";
+
 import { AppShell, PageHead } from "../../components/Shell.tsx";
 import { Card, Notice } from "../../components/ui.tsx";
 import { isEphemeralDatabase } from "../../lib/db.ts";
 import { requireAdmin } from "../../lib/session.ts";
 import { catalogueFor, listTenants } from "../../lib/tenants.ts";
+import type { RepoListResult } from "../../lib/github.ts";
 import { githubConfigured, listRepos } from "../../lib/github.ts";
 import { tokenSource } from "../../lib/github-credentials.ts";
+import { REPOS_COOKIE } from "../../lib/rules.ts";
 import { GithubConnectPanel } from "./GithubConnectPanel.tsx";
 import { TenantForm } from "./TenantForm.tsx";
 
@@ -19,9 +23,19 @@ export default async function TenantsPage() {
   // renders and explains itself rather than 500-ing the admin page.
   const source = tokenSource();
   const connectedRepos = new Set(tenants.map((t) => t.github_repo.toLowerCase()).filter(Boolean));
-  const listed = live
-    ? await listRepos(connectedRepos)
-    : { ok: false, repos: [], error: undefined, source: "none" as const };
+
+  // Discovery runs on request, not on every page view: it is two GitHub round-trips and a
+  // slow API used to block the whole admin screen. The cookie records the intent; the list
+  // is still fetched fresh here, never cached.
+  const loaded = (await cookies()).get(REPOS_COOKIE)?.value === "1";
+  const listed: RepoListResult =
+    live && loaded
+      ? await listRepos(connectedRepos)
+      : {
+          ok: false,
+          repos: [],
+          source: source.ok ? (source.kind === "env" ? "env" : "stored") : "none",
+        };
 
   return (
     <AppShell user={user} active="tenants" ephemeral={isEphemeralDatabase()}>
@@ -41,11 +55,13 @@ export default async function TenantsPage() {
         <GithubConnectPanel
           tokenState={source.ok ? (source.kind === "env" ? "env" : "stored") : "none"}
           tokenHint={source.ok && "hint" in source ? source.hint : null}
+          listed={listed}
           repos={listed.repos}
           listError={listed.error}
           source={listed.source}
           ephemeral={isEphemeralDatabase()}
           sourceDetail={source.ok ? undefined : source.detail}
+          loaded={loaded && live}
         />
 
         <div className="row tight" style={{ marginTop: 4 }}>

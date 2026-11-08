@@ -206,3 +206,40 @@ repositories, an operator should not have to type `owner/repo`. `listRepos()` re
 `/user/repos` and **/tenants** offers one-click connect, prefilling name and handover folder
 from the repository itself. Connecting is still just a tenant row — the consuming repo gains
 no code, workflow or deploy, which is the whole point of plug-and-play.
+
+## Why "I only see one of my repositories" was not a discovery bug
+
+`listRepos()` was correct and the token was valid: `/user/repos` returned exactly what it was
+allowed to return. The report ("I have many projects on GitHub and I can only see one
+repository") still needed fixing, because the screen gave the operator no way to tell a
+**scoped credential** from a **broken feature** — and the honest answer, "GitHub only told us
+about one", was not on the page anywhere.
+
+The fix is to compare numbers instead of showing one:
+
+| Number | Source | What a gap means |
+| --- | --- | --- |
+| repositories this token lists | `/user/repos` (paged) | what the hub can connect and publish into |
+| public repositories on the profile | `/users/<owner>/repos` (`Link: rel="last"`) | what the operator expects to see |
+| total GitHub reports for the credential | `Link: rel="last"` on `/user/repos` | a page cap (1000) rather than a scope |
+
+`lib/repo-discovery.ts` turns those three into one sentence and a cause (`scoped-token`,
+`no-token`, `truncated`, `failed`), and every write path uses it: **Test connection**, *Save and
+verify*, a single connect, a bulk connect. A connect attempt that names an invisible repository
+now returns the scope explanation with the fix, rather than "not visible to the hub's token".
+
+Two related decisions:
+
+**Discovery runs on request.** It used to be awaited inside the `/tenants` render, so an
+unreachable GitHub API blocked the admin screen and every page view paid two round-trips. The
+`feh_gh_repos` cookie records the intent (**Load my projects** / **Hide**); the list itself is
+still fetched fresh on each render, never cached — a stale repository list is worse than a wait.
+
+**The list is not a table.** Eight columns of metadata pushed the one thing an operator needs —
+"is this mine, and can I connect it?" — below the fold on a phone. Repositories are cards now,
+with the connect form above them and the bulk form collapsed.
+
+A note on what this cannot fix: if the token genuinely cannot see a repository, the hub cannot
+connect it or publish into it either. The remedy is always on the GitHub side (repository access
+on a fine-grained token, the `repo` scope on a classic one, SSO approval for an organisation) —
+so the panel names it instead of retrying.

@@ -1,10 +1,13 @@
 import {
+  cancelGithubReposAction,
   connectRepoAction,
   connectReposAction,
+  loadGithubReposAction,
   saveGithubTokenAction,
   testGithubConnectionAction,
 } from "../actions/admin.ts";
-import type { GithubRepo } from "../../lib/github.ts";
+import type { GithubRepo, RepoListResult } from "../../lib/github.ts";
+import { diagnoseRepoListing, type DiscoveryReport } from "../../lib/repo-discovery.ts";
 import { Notice } from "../../components/ui.tsx";
 import { ActionForm, SubmitButton } from "./ActionForm.tsx";
 
@@ -13,27 +16,42 @@ import { ActionForm, SubmitButton } from "./ActionForm.tsx";
  * do in the browser:
  *   1. the GitHub token (encrypted at rest, verified against the API on save)
  *   2. a picker over every repository the token can see, connecting one as a tenant
+ *
+ * The project list doubles as the answer to "why can I only see one of my repositories?".
+ * `/user/repos` cannot show what a scoped token is blind to, so the panel compares the
+ * listed count with the public count on the account (`diagnoseRepoListing`) instead of
+ * presenting a short list as if it were complete.
  */
 export function GithubConnectPanel({
   tokenState,
   tokenHint,
+  listed,
   repos,
   listError,
   source,
   ephemeral,
   sourceDetail,
+  loaded,
 }: {
   tokenState: "env" | "stored" | "none";
   tokenHint: string | null;
+  /** The full listing result, so the panel can explain a short list. */
+  listed: RepoListResult;
   repos: GithubRepo[];
   listError?: string;
   source: "env" | "stored" | "none";
   ephemeral: boolean;
   /** Specific reason when no usable token exists (empty env var, rotated secret, …). */
   sourceDetail?: string;
+  /** False until the admin asks for the list — loading it is two GitHub calls and a wait. */
+  loaded: boolean;
 }) {
   const connected = repos.filter((repo) => repo.connected);
   const available = repos.filter((repo) => !repo.connected);
+  const report: DiscoveryReport = diagnoseRepoListing(
+    { ...listed, repos, error: listError ?? listed.error, source },
+    sourceDetail,
+  );
 
   return (
     <div className="stack" style={{ gap: 14 }}>
@@ -63,7 +81,8 @@ export function GithubConnectPanel({
             Test connection
           </SubmitButton>
           <span className="tiny dim">
-            Asks GitHub who this token belongs to and how many repositories it can see.
+            Asks GitHub who this token belongs to, how many repositories it lists, and how many the account actually
+            has.
           </span>
         </ActionForm>
 
@@ -129,145 +148,187 @@ export function GithubConnectPanel({
             Your GitHub projects
           </h2>
           <span className="sid">sec.github.repos</span>
-          {repos.length > 0 ? (
+          {loaded ? (
             <span className="tag violet">
               {repos.length} visible · {connected.length} connected
             </span>
-          ) : null}
+          ) : (
+            <span className="tag dim">not loaded yet</span>
+          )}
         </div>
         <p className="small muted" style={{ marginTop: 0 }}>
-          Connect any repository as a tenant — the consuming repo needs no code, no workflow and no deploy. Publishing
-          simply commits a Markdown handover into its <span className="mono">docs/enhancements/</span> folder.
+          Every repository the hub&apos;s token can see, with what GitHub disclosed about it. Connecting one creates a
+          tenant row — the consuming repo needs no code, no workflow and no deploy, and publishing simply commits a
+          Markdown handover into its <span className="mono">docs/enhancements/</span> folder.
         </p>
 
-        {listError ? <Notice tone="error">{listError}</Notice> : null}
-
-        {source === "none" && !listError ? (
-          <div className="notice warn" role="alert">
-            <span className="icon">!</span>
-            <div>
-              <strong>Your projects cannot appear yet: no token is in use.</strong> GitHub has no way to know which
-              repositories are yours without a credential, so this list stays empty until one works. Paste a token in
-              the panel above — it must include the <span className="mono">repo</span> scope (classic) or{" "}
-              <span className="mono">Contents: read</span> + <span className="mono">Metadata: read</span>{" "}
-              (fine-grained). If a token is already saved, an empty <span className="mono">GITHUB_TOKEN</span> variable
-              in your hosting settings overrides it — delete that variable.
-            </div>
-          </div>
-        ) : null}
-
-        {repos.length === 0 ? (
-          listError ? null : source === "none" ? null : (
-            <p className="small dim">No repositories were returned for this token.</p>
-          )
-        ) : (
-          <ActionForm action={connectRepoAction} className="stack" style={{ gap: 10 }}>
-            <div className="field-row">
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor="gh-repo">Repository</label>
-                <select id="gh-repo" name="repo" defaultValue={available[0]?.fullName ?? ""} required>
-                  {available.length === 0 ? <option value="">All visible repositories are connected</option> : null}
-                  {available.map((repo) => (
-                    <option key={repo.fullName} value={repo.fullName}>
-                      {repo.fullName}
-                      {repo.private ? " (private)" : ""}
-                      {repo.archived ? " (archived)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor="gh-dir">Handover folder</label>
-                <input id="gh-dir" name="handover_dir" defaultValue="docs/enhancements" placeholder="docs/enhancements" />
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor="gh-name">App name (optional)</label>
-                <input id="gh-name" name="name" placeholder="defaults to the repo name" />
-              </div>
-            </div>
+        {!loaded ? (
+          <div className="stack" style={{ gap: 10 }}>
             <div className="row tight">
-              <SubmitButton className="btn-primary" pendingLabel="Connecting…" disabled={available.length === 0}>
-                Connect as tenant
-              </SubmitButton>
-              <span className="tiny dim">Creates the tenant only; nothing is written to the repository yet.</span>
-            </div>
-          </ActionForm>
-        )}
-
-        {repos.length > 1 ? (
-          <details className="bulk-connect" style={{ marginTop: 12 }}>
-            <summary className="small" style={{ cursor: "pointer" }}>
-              Connect several projects at once ({available.length} not connected)
-            </summary>
-            <ActionForm action={connectReposAction} className="stack" style={{ gap: 10, marginTop: 10 }}>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor="gh-bulk">
-                  Repositories — one per line (<span className="mono">owner/name</span>)
-                </label>
-                <textarea
-                  id="gh-bulk"
-                  name="repos"
-                  rows={5}
-                  placeholder={available
-                    .slice(0, 3)
-                    .map((repo) => repo.fullName)
-                    .join("\n")}
-                />
-                <p className="tiny dim" style={{ margin: "4px 0 0" }}>
-                  Full GitHub URLs are accepted too. Each name is checked against your token before anything is
-                  created.
-                </p>
-              </div>
-              <div className="row tight">
-                <div className="field" style={{ marginBottom: 0, maxWidth: 260 }}>
-                  <label htmlFor="gh-bulk-dir">Handover folder</label>
-                  <input id="gh-bulk-dir" name="handover_dir" defaultValue="docs/enhancements" />
-                </div>
-                <SubmitButton className="btn-primary" pendingLabel="Connecting…">
-                  Connect listed projects
+              <ActionForm action={loadGithubReposAction} className="row tight">
+                <SubmitButton className="btn-primary" pendingLabel="Asking GitHub…">
+                  Load my projects
                 </SubmitButton>
-              </div>
-            </ActionForm>
-          </details>
-        ) : null}
-
-        {repos.length > 0 ? (
-          <div className="table-wrap" style={{ marginTop: 12 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Repository</th>
-                  <th>Visibility</th>
-                  <th>Last push</th>
-                  <th>Tenant</th>
-                </tr>
-              </thead>
-              <tbody>
-                {repos.map((repo) => (
-                  <tr key={repo.fullName}>
-                    <td>
-                      <a href={repo.htmlUrl} target="_blank" rel="noreferrer" className="mono small">
-                        {repo.fullName}
-                      </a>
-                    </td>
-                    <td>
-                      <span className={repo.private ? "tag amber" : "tag mint"}>{repo.private ? "private" : "public"}</span>
-                      {repo.archived ? <span className="tag dim">archived</span> : null}
-                    </td>
-                    <td className="tiny dim">{repo.pushedAt ? new Date(repo.pushedAt).toISOString().slice(0, 10) : "—"}</td>
-                    <td>
-                      {repo.connected ? (
-                        <span className="tag mint">connected</span>
-                      ) : (
-                        <span className="tag dim">not connected</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              </ActionForm>
+              <span className="tiny dim">Two GitHub calls. Nothing is changed by loading.</span>
+            </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="stack" style={{ gap: 12 }}>
+            <div className={`notice ${report.tone === "ok" ? "ok" : report.tone}`} role={report.tone === "ok" ? "status" : "alert"}>
+              <span className="icon">{report.tone === "ok" ? "✓" : "!"}</span>
+              <div>
+                <strong>{report.headline}</strong>{" "}
+                <span className="small">{report.detail}</span>
+                {report.facts.length > 0 ? (
+                  <div className="row tight" style={{ marginTop: 8 }}>
+                    {report.facts.map((fact) => (
+                      <span key={fact.label} className="tag" title={fact.label}>
+                        {fact.label}: <span className="mono">{fact.value}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {listError ? <Notice tone="error">{listError}</Notice> : null}
+
+            {repos.length === 0 ? (
+              <div className="row tight">
+                <ActionForm action={loadGithubReposAction} className="row tight">
+                  <SubmitButton className="btn-sm" pendingLabel="Asking GitHub…">
+                    Try again
+                  </SubmitButton>
+                </ActionForm>
+                <ActionForm action={cancelGithubReposAction} className="row tight">
+                  <SubmitButton className="btn-sm btn-ghost" pendingLabel="Hiding…">
+                    Hide the project list
+                  </SubmitButton>
+                </ActionForm>
+              </div>
+            ) : (
+              <>
+                <ActionForm action={connectRepoAction} className="stack" style={{ gap: 10 }}>
+                  <div className="field-row">
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label htmlFor="gh-repo">Repository</label>
+                      <select id="gh-repo" name="repo" defaultValue={available[0]?.fullName ?? ""} required>
+                        {available.length === 0 ? <option value="">All visible repositories are connected</option> : null}
+                        {available.map((repo) => (
+                          <option key={repo.fullName} value={repo.fullName}>
+                            {repo.fullName}
+                            {repo.private ? " (private)" : ""}
+                            {repo.archived ? " (archived)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label htmlFor="gh-dir">Handover folder</label>
+                      <input id="gh-dir" name="handover_dir" defaultValue="docs/enhancements" placeholder="docs/enhancements" />
+                    </div>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label htmlFor="gh-name">App name (optional)</label>
+                      <input id="gh-name" name="name" placeholder="defaults to the repo name" />
+                    </div>
+                  </div>
+                  <div className="row tight">
+                    <SubmitButton className="btn-primary" pendingLabel="Connecting…" disabled={available.length === 0}>
+                      Connect as tenant
+                    </SubmitButton>
+                    <span className="tiny dim">Creates the tenant only; nothing is written to the repository yet.</span>
+                  </div>
+                </ActionForm>
+
+                {repos.length > 1 ? (
+                  <details className="bulk-connect">
+                    <summary className="small" style={{ cursor: "pointer" }}>
+                      Connect several projects at once ({available.length} not connected)
+                    </summary>
+                    <ActionForm action={connectReposAction} className="stack" style={{ gap: 10, marginTop: 10 }}>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label htmlFor="gh-bulk">
+                          Repositories — one per line (<span className="mono">owner/name</span>)
+                        </label>
+                        <textarea
+                          id="gh-bulk"
+                          name="repos"
+                          rows={5}
+                          placeholder={repos
+                            .slice(0, 3)
+                            .map((repo) => repo.fullName)
+                            .join("\n")}
+                        />
+                        <p className="tiny dim" style={{ margin: "4px 0 0" }}>
+                          Full GitHub URLs are accepted too. Each name is checked against your token before anything is
+                          created.
+                        </p>
+                      </div>
+                      <div className="row tight">
+                        <div className="field" style={{ marginBottom: 0, maxWidth: 260 }}>
+                          <label htmlFor="gh-bulk-dir">Handover folder</label>
+                          <input id="gh-bulk-dir" name="handover_dir" defaultValue="docs/enhancements" />
+                        </div>
+                        <SubmitButton className="btn-primary" pendingLabel="Connecting…">
+                          Connect listed projects
+                        </SubmitButton>
+                      </div>
+                    </ActionForm>
+                  </details>
+                ) : null}
+
+                <div className="grid cols-3" style={{ gap: 10 }}>
+                  {repos.map((repo) => (
+                    <div key={repo.fullName} className="card flat" style={{ padding: 12 }}>
+                      <div className="row tight" style={{ marginBottom: 4 }}>
+                        <a href={repo.htmlUrl} target="_blank" rel="noreferrer" className="strong small">
+                          {repo.name}
+                        </a>
+                        {repo.private ? <span className="tag amber">private</span> : <span className="tag mint">public</span>}
+                        {repo.archived ? <span className="tag dim">archived</span> : null}
+                      </div>
+                      <div className="tiny dim mono" style={{ wordBreak: "break-all" }}>
+                        {repo.fullName}
+                      </div>
+                      {repo.description ? (
+                        <div className="tiny muted" style={{ marginTop: 4 }}>
+                          {repo.description}
+                        </div>
+                      ) : null}
+                      <div className="row tight" style={{ marginTop: 8 }}>
+                        <span className="tiny dim">
+                          pushed {repo.pushedAt ? new Date(repo.pushedAt).toISOString().slice(0, 10) : "—"}
+                        </span>
+                        {repo.connected ? (
+                          <span className="tag mint">connected</span>
+                        ) : (
+                          <span className="tag dim">not connected</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="row tight">
+                  <span className="tag" title="GitHub's own count for this credential, if it reported one">
+                    GitHub reports {listed.totalVisible ?? repos.length} for this token
+                  </span>
+                  <ActionForm action={loadGithubReposAction} className="row tight">
+                    <SubmitButton className="btn-sm btn-ghost" pendingLabel="Refreshing…">
+                      Refresh
+                    </SubmitButton>
+                  </ActionForm>
+                  <ActionForm action={cancelGithubReposAction} className="row tight">
+                    <SubmitButton className="btn-sm btn-ghost" pendingLabel="Hiding…">
+                      Hide
+                    </SubmitButton>
+                  </ActionForm>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );

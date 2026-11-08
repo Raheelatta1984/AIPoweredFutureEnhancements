@@ -133,7 +133,14 @@ the reasoning; this file is the checklist.
     `GITHUB_TOKEN` (present, blank, and overriding stored tokens), a never-configured hub, and
     ciphertext that a rotated `SESSION_SECRET` can no longer decrypt. Never collapse them into
     one blank state — an operator cannot act on "nothing here".
-40. **Do not present tenant cards as if they were repositories.** `/login` lists tenants (apps
+40. **Never present a short repository list as if it were complete.** `/user/repos` returns only
+    what the token may see, so a fine-grained token scoped to one repo is indistinguishable
+    from an account with one repo *unless the numbers are compared*. `lib/repo-discovery.ts`
+    compares the listed count with the account's public repository count and with GitHub's
+    own total, and names the cause (`scoped-token`, `no-token`, `truncated`, `failed`). The
+    reported bug was exactly this: one repository shown, twenty expected, nothing said.
+    Discovery also runs on request (the `feh_gh_repos` cookie), not during every page render.
+41. **Do not present tenant cards as if they were repositories.** `/login` lists tenants (apps
     already served); the GitHub project picker is admin-only on `/tenants`. Both screens say
     what they are, and `/tenants` puts the GitHub panels *above* the tenant list.
 

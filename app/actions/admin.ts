@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 
 import { hashPassword, revokeAllForPerson } from "../../lib/auth.ts";
 import { recordAudit } from "../../lib/audit.ts";
@@ -8,6 +9,7 @@ import { run } from "../../lib/db.ts";
 import { tenantSlugFrom } from "../../lib/enhancements.ts";
 import { isRole } from "../../lib/roles.ts";
 import { currentUser } from "../../lib/session.ts";
+import { REPOS_COOKIE } from "../../lib/rules.ts";
 import { getTenantById, listTenants, parseJson } from "../../lib/tenants.ts";
 import { randomUUID } from "node:crypto";
 
@@ -292,9 +294,13 @@ export async function saveGithubTokenAction(_prev: AdminState, formData: FormDat
   }
   const listed = await listRepos();
   const state = tokenState();
+  // Report what the token can *see*, not just that it authenticated: "verified" while the
+  // list is one repo short is exactly the confusion this panel exists to remove.
+  const { diagnoseRepoListing, discoveryMessage } = await import("../../lib/repo-discovery.ts");
+  const report = diagnoseRepoListing(listed);
   return {
     ok: true,
-    message: `Token verified as ${check.login ?? "a GitHub account"}${state.hint ? ` (${state.hint})` : ""} — ${listed.repos.length} repositories visible.`,
+    message: `Token verified as ${check.login ?? "a GitHub account"}${state.hint ? ` (${state.hint})` : ""}. ${discoveryMessage(report)}`,
   };
 }
 
@@ -307,10 +313,17 @@ export async function connectRepoAction(_prev: AdminState, formData: FormData): 
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) return { error: 'Pick a repository (expected "owner/name").' };
 
   const { listRepos } = await import("../../lib/github.ts");
+  const { diagnoseRepoListing } = await import("../../lib/repo-discovery.ts");
   const listed = await listRepos();
   if (!listed.ok) return { error: listed.error ?? "Could not read the repository list." };
   const repo = listed.repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
-  if (!repo) return { error: `${fullName} is not visible to the hub's token.` };
+  if (!repo) {
+    const report = diagnoseRepoListing(listed);
+    const scope = report.cause === "scoped-token" ? report.detail : "";
+    return {
+      error: `${fullName} is not visible to the hub's token, so the hub could not publish into it.${scope ? ` ${scope}` : ""}`,
+    };
+  }
 
   const tenants = listTenants();
   if (tenants.some((t) => t.github_repo.toLowerCase() === repo.fullName.toLowerCase())) {
@@ -369,6 +382,7 @@ export async function connectReposAction(_prev: AdminState, formData: FormData):
   if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
 
   const { parseRepoLines, listRepos } = await import("../../lib/github.ts");
+  const { diagnoseRepoListing } = await import("../../lib/repo-discovery.ts");
   const parsed = parseRepoLines(String(formData.get("repos") ?? ""));
   if (parsed.valid.length === 0) {
     return {
@@ -440,9 +454,12 @@ export async function connectReposAction(_prev: AdminState, formData: FormData):
   revalidatePath("/");
 
   if (connected.length === 0) {
+    const report = diagnoseRepoListing(listed);
     const why = [
       skipped.length ? `already connected: ${skipped.join(", ")}` : "",
-      unknown.length ? `not visible to the token: ${unknown.join(", ")}` : "",
+      unknown.length
+        ? `not visible to the token: ${unknown.join(", ")}${report.cause === "scoped-token" ? ` — ${report.detail}` : ""}`
+        : "",
       parsed.invalid.length ? `not "owner/repo": ${parsed.invalid.join(", ")}` : "",
     ]
       .filter(Boolean)
@@ -468,22 +485,62 @@ export async function testGithubConnectionAction(_prev: AdminState, _formData: F
   const user = await currentUser();
   if (!user?.canAdmin) return { error: "Only hub admins can test the GitHub connection." };
 
-  const { checkGithubConnection } = await import("../../lib/github.ts");
+  const { listRepos } = await import("../../lib/github.ts");
   const { tokenSource } = await import("../../lib/github-credentials.ts");
+  const { diagnoseRepoListing, discoveryMessage } = await import("../../lib/repo-discovery.ts");
   const source = tokenSource();
   if (!source.ok) return { error: source.detail };
 
-  const check = await checkGithubConnection();
+  const listed = await listRepos();
+  const report = diagnoseRepoListing(listed);
+  const check = {
+    ok: listed.ok,
+    login: listed.owner,
+    repoCount: listed.repos.length,
+    profilePublicCount: listed.profilePublicCount,
+    totalVisible: listed.totalVisible,
+    error: listed.error,
+  };
   recordAudit({
     tenantId: user.tenantId,
     actor: user.person.email,
     action: check.ok ? "github.connection_ok" : "github.connection_failed",
     subject: "settings",
-    meta: { login: check.login ?? null, repoCount: check.repoCount ?? null, error: check.error ?? null },
+    meta: {
+      login: check.login ?? null,
+      repoCount: check.repoCount,
+      profilePublicCount: check.profilePublicCount ?? null,
+      totalVisible: check.totalVisible ?? null,
+      cause: report.cause ?? null,
+      error: check.error ?? null,
+    },
   });
-  if (!check.ok) return { error: `GitHub check failed: ${check.error ?? "unknown error"}` };
-  return {
-    ok: true,
-    message: `Connected as ${check.login ?? "an account"} — ${check.repoCount ?? 0} repositories visible to this token.`,
-  };
+  revalidatePath("/tenants");
+  if (!listed.ok) return { error: `GitHub check failed: ${listed.error ?? "unknown error"}` };
+  return { ok: true, message: discoveryMessage(report) };
+}
+
+/**
+ * "Load my projects" — an explicit request instead of two GitHub calls on every page view.
+ *
+ * Discovery used to run inside the page render, so a slow or unreachable GitHub API blocked
+ * the whole admin screen and the list appeared before anyone asked for it. The cookie only
+ * records the *intent*; the list itself is still fetched from GitHub on each render.
+ */
+export async function loadGithubReposAction(_prev: AdminState, _formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can list repositories." };
+  const jar = await cookies();
+  jar.set(REPOS_COOKIE, "1", { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
+  revalidatePath("/tenants");
+  return { ok: true, message: "Project list loaded from GitHub." };
+}
+
+export async function cancelGithubReposAction(_prev: AdminState, _formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can change this." };
+  const jar = await cookies();
+  jar.delete(REPOS_COOKIE);
+  revalidatePath("/tenants");
+  return { ok: true, message: "Project list hidden. Press “Load my projects” to fetch it again." };
 }
