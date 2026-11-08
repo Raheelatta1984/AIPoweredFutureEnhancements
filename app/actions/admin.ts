@@ -357,3 +357,108 @@ export async function connectRepoAction(_prev: AdminState, formData: FormData): 
     message: `Connected ${repo.fullName} as "${name}" (${slug}). Publishing writes to ${handoverDir}/ on ${repo.defaultBranch}.`,
   };
 }
+
+/**
+ * Bulk connect: paste many "owner/name" lines and create a tenant for each.
+ *
+ * Every name is checked against the token's live repository list first, so a typo
+ * becomes a reported error instead of a tenant that can never publish.
+ */
+export async function connectReposAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
+
+  const { parseRepoLines, listRepos } = await import("../../lib/github.ts");
+  const parsed = parseRepoLines(String(formData.get("repos") ?? ""));
+  if (parsed.valid.length === 0) {
+    return {
+      error: parsed.invalid.length
+        ? `None of those look like "owner/repo": ${parsed.invalid.slice(0, 5).join(", ")}`
+        : "Paste at least one repository, one per line.",
+    };
+  }
+
+  const listed = await listRepos();
+  if (!listed.ok) return { error: listed.error ?? "Could not read the repository list." };
+  const known = new Map(listed.repos.map((repo) => [repo.fullName.toLowerCase(), repo]));
+
+  const handoverDir = (String(formData.get("handover_dir") ?? "").trim() || "docs/enhancements").replace(
+    /^\/+|\/+$/g,
+    "",
+  );
+  const tenants = listTenants();
+  const taken = new Set(tenants.map((t) => t.github_repo.toLowerCase()).filter(Boolean));
+  let slugs = tenants.map((t) => t.slug);
+
+  const connected: string[] = [];
+  const skipped: string[] = [];
+  const unknown: string[] = [];
+
+  for (const fullName of parsed.valid) {
+    const key = fullName.toLowerCase();
+    if (taken.has(key)) {
+      skipped.push(`${fullName} (already connected)`);
+      continue;
+    }
+    const repo = known.get(key);
+    if (!repo) {
+      unknown.push(fullName);
+      continue;
+    }
+    const name = repo.name.replace(/[-_]/g, " ");
+    const slug = tenantSlugFrom(name, slugs);
+    slugs = [...slugs, slug];
+    run(
+      `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      [
+        randomUUID(),
+        slug,
+        name,
+        repo.description ?? `Connected from ${repo.fullName}.`,
+        repo.fullName,
+        handoverDir,
+        JSON.stringify(["General"]),
+        JSON.stringify({}),
+        "#5b8cff",
+        100 + slugs.length,
+        new Date().toISOString(),
+      ],
+    );
+    taken.add(key);
+    connected.push(repo.fullName);
+  }
+
+  recordAudit({
+    tenantId: user.tenantId,
+    actor: user.person.email,
+    action: "tenant.bulk_connected",
+    subject: "tenants",
+    after: { connected, skipped, unknown, handoverDir },
+  });
+  revalidatePath("/tenants");
+  revalidatePath("/");
+
+  if (connected.length === 0) {
+    const why = [
+      skipped.length ? `already connected: ${skipped.join(", ")}` : "",
+      unknown.length ? `not visible to the token: ${unknown.join(", ")}` : "",
+      parsed.invalid.length ? `not "owner/repo": ${parsed.invalid.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return { error: `Nothing was connected. ${why}` };
+  }
+
+  const extras = [
+    skipped.length ? `${skipped.length} already connected` : "",
+    unknown.length ? `${unknown.length} not visible to the token` : "",
+    parsed.invalid.length ? `${parsed.invalid.length} malformed` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return {
+    ok: true,
+    message: `Connected ${connected.length} project${connected.length === 1 ? "" : "s"} → ${handoverDir}/: ${connected.join(", ")}${extras ? ` (${extras})` : ""}`,
+  };
+}

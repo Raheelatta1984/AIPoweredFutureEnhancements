@@ -13,7 +13,7 @@
     "prebuild": "node scripts/embed-migrations.mjs",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
-    "test": "node --import tsx --test tests/rules.test.ts tests/studio.test.ts tests/auth.test.mts tests/lifecycle.test.mts tests/docs-sync.test.mts tests/deploy.test.mts tests/github.test.mts",
+    "test": "node --import tsx --test tests/rules.test.ts tests/studio.test.ts tests/auth.test.mts tests/lifecycle.test.mts tests/docs-sync.test.mts tests/deploy.test.mts tests/github.test.mts tests/publish.test.mts",
     "typecheck": "tsc --noEmit",
     "db:embed": "node scripts/embed-migrations.mjs",
     "db:migrate": "tsx scripts/migrate.ts",

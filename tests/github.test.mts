@@ -28,7 +28,7 @@ const { findPersonByEmail, verifyPassword } = await import("../lib/auth.ts");
 const { clearGithubToken, resolveGithubToken, storeGithubToken, tokenState } = await import(
   "../lib/github-credentials.ts"
 );
-const { githubConfigured, normaliseDir, splitRepo } = await import("../lib/github.ts");
+const { githubConfigured, normaliseDir, parseRepoLines, splitRepo } = await import("../lib/github.ts");
 const { runtimeWarnings } = await import("../lib/runtime-warnings.ts");
 
 after(() => {
@@ -209,4 +209,43 @@ test("seeding is still idempotent after the repair logic", async () => {
   const result = await seed();
   assert.equal(result.skipped, true);
   assert.equal(count("enhancements"), before);
+});
+
+/* ----------------------------------------------------------------- bulk connect */
+
+test("pasted repo lists are parsed leniently but validated strictly", () => {
+  const parsed = parseRepoLines(`
+    Raheelatta1984/QA-Activity-Calendar
+    https://github.com/Raheelatta1984/other-repo.git
+    raheelatta1984/qa-activity-calendar
+    not-a-repo
+    # a comment line
+    owner/two, owner/three; owner/four
+  `);
+  assert.deepEqual(parsed.valid, [
+    "Raheelatta1984/QA-Activity-Calendar",
+    "Raheelatta1984/other-repo",
+    "owner/two",
+    "owner/three",
+    "owner/four",
+  ]);
+  assert.equal(parsed.invalid.length >= 1, true, "malformed entries are reported, not dropped silently");
+  assert.ok(parsed.valid.length === 5, "duplicate (case-insensitive) is collapsed");
+});
+
+test("an empty or nonsense list yields nothing valid", () => {
+  assert.deepEqual(parseRepoLines(""), { valid: [], invalid: [] });
+  assert.deepEqual(parseRepoLines("   \n  # only comments\n"), { valid: [], invalid: [] });
+  assert.equal(parseRepoLines("hello world").valid.length, 0);
+});
+
+test("listing without a token explains the credential requirement", async () => {
+  delete process.env.GITHUB_TOKEN;
+  clearGithubToken();
+  const { listRepos } = await import("../lib/github.ts");
+  const listed = await listRepos();
+  assert.equal(listed.ok, false);
+  assert.equal(listed.repos.length, 0);
+  assert.equal(listed.source, "none");
+  assert.match(listed.error ?? "", /Paste one on \/tenants|GITHUB_TOKEN/);
 });

@@ -88,6 +88,7 @@ export default async function TenantsPage() {
           repos={listed.repos}
           listError={listed.error}
           source={listed.source}
+          ephemeral={isEphemeralDatabase()}
         />
 
         <Card title="Add a tenant manually" sid="sec.tenants-new">
