@@ -100,6 +100,25 @@ the reasoning; this file is the checklist.
     session secret, ephemeral storage and disabled publishing. A deployment must never look
     healthy while losing data or accepting forgeable cookies.
 
+## Credentials and first-run
+
+32. **Sign-in must bootstrap the database before it looks anything up.** `loginAction`
+    awaits `ensureBootReady()` *before* `findPersonByEmail`. The POST can land on a
+    serverless instance that never rendered `/login`, and every instance starts with its
+    own empty `/tmp` — skipping this makes a correct password report "no active account"
+    (this shipped once; `tests/github.test.mts` pins the ordering).
+33. **Bootstrap never caches a failure, and repairs a partial seed.** `ensureSeed()` clears
+    itself on error so the next request retries, and readiness means tenants **and** people
+    exist — a half-written seed is a hub nobody can sign in to.
+34. **A UI-entered token is encrypted at rest.** `lib/github-credentials.ts` seals it with
+    AES-256-GCM under a key derived from `SESSION_SECRET` (HKDF, purpose-bound). Env
+    `GITHUB_TOKEN` always wins; undecryptable ciphertext degrades to "not configured"
+    instead of throwing. Never render a token — `/tenants` shows a 4-character tail.
+35. **A client component must not reach `node:*`.** `components/ui.tsx` imports
+    `Shell.tsx` → `runtime-warnings` → `node:crypto`, so any `"use client"` file that
+    imports from `ui.tsx` breaks `next build` with `UnhandledSchemeError`. Server data
+    + a small client child (`app/tenants/ActionForm.tsx`) is the pattern to copy.
+
 ## Verification before you push
 
 ```bash
@@ -110,8 +129,9 @@ npm run build         # never while `next dev` is running (shared .next corrupti
 
 Test files: `rules` (pure helpers), `studio` (drafting engine), `auth` (scrypt, sessions,
 revocation, tenant-access guard), `lifecycle` (submit → publish → archive → delete),
-`docs-sync` (repo reconciliation) and `deploy` (seed idempotency, serverless paths, runtime
-warnings). Files that use top-level await must be `.mts`, because
+`docs-sync` (repo reconciliation), `deploy` (seed idempotency, serverless paths, runtime
+warnings) and `github` (auth bootstrap ordering, cold-instance sign-in, partial-seed repair,
+token encryption/resolution, repo name handling). Files that use top-level await must be `.mts`, because
 tsx compiles a plain `.ts` to CJS and CJS rejects top-level await.
 
 Add a test for every behavioural change. If a rule above needs to change, update this file,

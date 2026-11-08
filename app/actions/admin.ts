@@ -247,3 +247,113 @@ export async function deactivateSelfAction(): Promise<AdminState> {
   void row;
   return { error: "Sign out and ask another admin to deactivate this account. Self-deactivation is blocked." };
 }
+
+/* ------------------------------------------------------------- github credentials */
+
+export async function saveGithubTokenAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can change the GitHub token." };
+
+  const { storeGithubToken, clearGithubToken, tokenState } = await import("../../lib/github-credentials.ts");
+  const remove = String(formData.get("remove") ?? "") === "1";
+  if (remove) {
+    clearGithubToken();
+    recordAudit({
+      tenantId: user.tenantId,
+      actor: user.person.email,
+      action: "github.token_cleared",
+      subject: "settings",
+    });
+    revalidatePath("/tenants");
+    return { ok: true, message: "Stored token removed." };
+  }
+
+  const token = String(formData.get("token") ?? "").trim();
+  if (!token) return { error: "Paste a token first." };
+  const stored = storeGithubToken(token);
+  if (!stored.ok) return { error: stored.error };
+
+  // Prove it works before reporting success — a token that cannot read is useless.
+  const { verifyToken, listRepos } = await import("../../lib/github.ts");
+  const check = await verifyToken();
+  recordAudit({
+    tenantId: user.tenantId,
+    actor: user.person.email,
+    action: check.ok ? "github.token_saved" : "github.token_rejected",
+    subject: "settings",
+    meta: check.ok ? { login: check.login ?? null } : { error: check.error ?? null },
+  });
+  revalidatePath("/tenants");
+  if (!check.ok) {
+    return {
+      ok: false,
+      error: `Saved, but GitHub rejected it (${check.error ?? "unknown error"}). Check the scopes: repo (or public_repo) for publishing.`,
+    };
+  }
+  const listed = await listRepos();
+  const state = tokenState();
+  return {
+    ok: true,
+    message: `Token verified as ${check.login ?? "a GitHub account"}${state.hint ? ` (${state.hint})` : ""} — ${listed.repos.length} repositories visible.`,
+  };
+}
+
+/** One-click connect: create a tenant straight from a repository the token can see. */
+export async function connectRepoAction(_prev: AdminState, formData: FormData): Promise<AdminState> {
+  const user = await currentUser();
+  if (!user?.canAdmin) return { error: "Only hub admins can connect repositories." };
+
+  const fullName = String(formData.get("repo") ?? "").trim();
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) return { error: 'Pick a repository (expected "owner/name").' };
+
+  const { listRepos } = await import("../../lib/github.ts");
+  const listed = await listRepos();
+  if (!listed.ok) return { error: listed.error ?? "Could not read the repository list." };
+  const repo = listed.repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
+  if (!repo) return { error: `${fullName} is not visible to the hub's token.` };
+
+  const tenants = listTenants();
+  if (tenants.some((t) => t.github_repo.toLowerCase() === repo.fullName.toLowerCase())) {
+    return { error: `${repo.fullName} is already connected to a tenant.` };
+  }
+
+  // Prefill from the repository rather than inventing values: the name, a one-line
+  // description, and a handover folder that exists in the repo if we can see one.
+  const name = String(formData.get("name") ?? "").trim() || repo.name.replace(/[-_]/g, " ");
+  const handoverDir = String(formData.get("handover_dir") ?? "").trim() || "docs/enhancements";
+  const colour = String(formData.get("colour") ?? "#5b8cff").trim() || "#5b8cff";
+
+  const existingSlugs = tenants.map((t) => t.slug);
+  const slug = tenantSlugFrom(name, existingSlugs);
+  const id = randomUUID();
+  run(
+    `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    [
+      id,
+      slug,
+      name,
+      repo.description ?? `Connected from ${repo.fullName}.`,
+      repo.fullName,
+      handoverDir.replace(/^\/+|\/+$/g, ""),
+      JSON.stringify(["General"]),
+      JSON.stringify({}),
+      colour,
+      100 + existingSlugs.length,
+      new Date().toISOString(),
+    ],
+  );
+  recordAudit({
+    tenantId: user.tenantId,
+    actor: user.person.email,
+    action: "tenant.connected",
+    subject: slug,
+    after: { slug, name, repo: repo.fullName, handoverDir, private: repo.private },
+  });
+  revalidatePath("/tenants");
+  revalidatePath("/");
+  return {
+    ok: true,
+    message: `Connected ${repo.fullName} as "${name}" (${slug}). Publishing writes to ${handoverDir}/ on ${repo.defaultBranch}.`,
+  };
+}

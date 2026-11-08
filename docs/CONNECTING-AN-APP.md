@@ -1,5 +1,10 @@
 # Connecting an app in about ten minutes
 
+> **Fastest path:** an admin can connect a repository straight from **/tenants → Your GitHub
+> projects** after pasting a token once in **/tenants → GitHub connection**. That creates the
+> tenant row for you; the rest of this guide is the same step done by hand, plus the detail
+> you need when the app's stable IDs and vocabulary differ from the defaults.
+
 This hub is **plug-and-play**. A consuming application never changes code to start sending
 proposals here: it becomes a **tenant**, which is pure data. The only thing the consuming
 repo needs is an agreed folder for handover documents.

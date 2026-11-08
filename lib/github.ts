@@ -4,6 +4,8 @@
  * rather than pretending the document exists (docs/DECISIONS.md).
  */
 
+import { resolveGithubToken } from "./github-credentials.ts";
+
 const API = "https://api.github.com";
 
 export type GithubConfig = { token: string | null; repo: string; branch?: string };
@@ -16,9 +18,9 @@ export type PublishResult = {
   error?: string;
 };
 
+/** Env token first, then the token an admin stored on /tenants. */
 export function githubToken(): string | null {
-  const token = process.env.GITHUB_TOKEN?.trim();
-  return token ? token : null;
+  return resolveGithubToken();
 }
 
 export function githubConfigured(): boolean {
@@ -168,6 +170,143 @@ export async function readDocument(
       ? Buffer.from(existing.content, "base64").toString("utf8")
       : "";
     return { ok: true, content };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/* ------------------------------------------------------------------ discovery */
+
+export type GithubRepo = {
+  /** "owner/name" — exactly what a tenant's github_repo column stores. */
+  fullName: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  archived: boolean;
+  description: string | null;
+  /** ISO date of the last push, or null when GitHub did not report one. */
+  pushedAt: string | null;
+  defaultBranch: string;
+  htmlUrl: string;
+  /** True when this repo is already connected to a tenant in the hub. */
+  connected: boolean;
+};
+
+export type RepoListResult = {
+  ok: boolean;
+  repos: GithubRepo[];
+  error?: string;
+  /** Which credential produced this list, for the UI to explain itself. */
+  source: "env" | "stored" | "none";
+};
+
+type RawRepo = {
+  full_name?: unknown;
+  name?: unknown;
+  owner?: { login?: unknown } | null;
+  private?: unknown;
+  archived?: unknown;
+  description?: unknown;
+  pushed_at?: unknown;
+  default_branch?: unknown;
+  html_url?: unknown;
+};
+
+/**
+ * Lists every repository the hub's token can see, so an admin can connect a project
+ * by picking it instead of typing "owner/repo".
+ *
+ * `connectedRepos` is passed in (lowercased) so the caller decides what "already
+ * connected" means without this module touching the database.
+ */
+export async function listRepos(connectedRepos: ReadonlySet<string> = new Set()): Promise<RepoListResult> {
+  const token = githubToken();
+  const source: RepoListResult["source"] = process.env.GITHUB_TOKEN?.trim() ? "env" : token ? "stored" : "none";
+  if (!token) {
+    return {
+      ok: false,
+      repos: [],
+      source,
+      error: "No GitHub token is available. Paste one on /tenants (or set GITHUB_TOKEN) to list your projects.",
+    };
+  }
+
+  const repos: GithubRepo[] = [];
+  try {
+    // 100 per page, capped at 10 pages: a hub needing more than 1000 repos is out of scope.
+    for (let page = 1; page <= 10; page += 1) {
+      const response = await fetch(`${API}/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "future-enhancements-hub",
+        },
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        const detail = await safeMessage(response);
+        return {
+          ok: false,
+          repos,
+          source,
+          error:
+            response.status === 401
+              ? "GitHub rejected the token (401). Check that it has not expired and has repo read access."
+              : `GitHub repository listing failed (${response.status}): ${detail}`,
+        };
+      }
+      const pageJson = (await response.json()) as unknown;
+      if (!Array.isArray(pageJson) || pageJson.length === 0) break;
+      for (const raw of pageJson as RawRepo[]) {
+        const fullName = typeof raw.full_name === "string" ? raw.full_name : "";
+        const owner = typeof raw.owner?.login === "string" ? raw.owner.login : fullName.split("/")[0] ?? "";
+        const name = typeof raw.name === "string" ? raw.name : fullName.split("/")[1] ?? "";
+        if (!owner || !name) continue;
+        repos.push({
+          fullName,
+          name,
+          owner,
+          private: Boolean(raw.private),
+          archived: Boolean(raw.archived),
+          description: typeof raw.description === "string" ? raw.description : null,
+          pushedAt: typeof raw.pushed_at === "string" ? raw.pushed_at : null,
+          defaultBranch: typeof raw.default_branch === "string" ? raw.default_branch : "main",
+          htmlUrl: typeof raw.html_url === "string" ? raw.html_url : `https://github.com/${fullName}`,
+          connected: connectedRepos.has(fullName.toLowerCase()),
+        });
+      }
+      if (pageJson.length < 100) break;
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      repos,
+      source,
+      error: `Could not reach GitHub: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  return { ok: true, repos, source };
+}
+
+/** Cheap credential check for the admin UI: does the token authenticate at all? */
+export async function verifyToken(): Promise<{ ok: boolean; login?: string; error?: string }> {
+  const token = githubToken();
+  if (!token) return { ok: false, error: "No token configured." };
+  try {
+    const response = await fetch(`${API}/user`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "future-enhancements-hub",
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) return { ok: false, error: `GitHub returned ${response.status}.` };
+    const json = (await response.json()) as { login?: unknown };
+    return { ok: true, login: typeof json.login === "string" ? json.login : undefined };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

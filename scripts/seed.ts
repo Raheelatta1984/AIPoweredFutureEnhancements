@@ -204,9 +204,11 @@ export async function seed(): Promise<{ tenants: number; people: number; enhance
     console.log("[db:seed] SEED_DEMO_DATA=false — demo content skipped.");
     return { tenants: 0, people: 0, enhancements: 0, skipped: true };
   }
-  // Fast path: a populated hub is never re-seeded, so a repeated run (or a boot
-  // bootstrap racing `db:seed`) cannot rewrite a single Markdown file.
-  const alreadySeeded = count("tenants") > 0;
+  // Fast path: a hub that is already populated AND has accounts is never re-seeded, so
+  // a repeated run cannot rewrite a single Markdown file. The people check matters: a
+  // half-written seed (tenants but no people) is a hub nobody can sign in to, so it
+  // must be completed rather than trusted.
+  const alreadySeeded = count("tenants") > 0 && count("people") > 0;
   const tenantBySlug: Record<string, TenantView> = {};
   for (const seedTenant of SEED_TENANTS) {
     tenantBySlug[seedTenant.slug] = await upsertTenant(seedTenant);

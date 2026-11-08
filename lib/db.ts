@@ -8,7 +8,7 @@
  *  2. Bound values must be `null | number | bigint | string | Uint8Array`. JS
  *     `undefined` throws and booleans are rejected, so `normalise()` coerces.
  */
-import { existsSync, mkdirSync } from "node:fs";
+import { constants, accessSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -51,6 +51,24 @@ export function databaseFile(): string {
 export function isEphemeralDatabase(): boolean {
   databaseFile();
   return ephemeral;
+}
+
+/**
+ * Whether the resolved database location is actually writable.
+ *
+ * Serverless bundles are read-only, so an explicit DATABASE_FILE pointing inside the
+ * bundle would fail on the first write. Callers that persist secrets check this first
+ * and report the problem instead of throwing mid-request.
+ */
+export function dbWritable(): boolean {
+  const file = databaseFile();
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    accessSync(dirname(file), constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Cost of a truthiness check on JS booleans mapped into SQLite. */

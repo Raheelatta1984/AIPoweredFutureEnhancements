@@ -15,19 +15,32 @@ import { seedDemoDataEnabled } from "./flags.ts";
 
 let booted: Promise<void> | null = null;
 
+/** Ready when tenants AND people exist: a half-written seed must be repaired. */
+function bootComplete(): boolean {
+  return count("tenants") > 0 && count("people") > 0;
+}
+
 async function bootstrapOnce(): Promise<void> {
   migrate();
   if (!seedDemoDataEnabled()) return;
-  if (count("tenants") > 0) return;
+  if (bootComplete()) return;
   const { seed } = await import("../scripts/seed.ts");
   await seed();
 }
 
-/** Idempotent, cached, never rejects. */
+/**
+ * Idempotent, never rejects — but never caches a failure either.
+ *
+ * The previous version stored the rejected promise forever, so one transient error
+ * (a locked database file, a cold-start race) disabled seeding for the whole life of
+ * the instance and every later sign-in failed. A failed attempt now clears itself so
+ * the next request retries.
+ */
 export function ensureSeed(): Promise<void> {
   if (!booted) {
     booted = bootstrapOnce().catch((error) => {
       console.error("[bootstrap] seed skipped:", error instanceof Error ? error.message : error);
+      booted = null; // retry on the next request
     });
   }
   return booted;

@@ -3,7 +3,9 @@ import { Card, Notice } from "../../components/ui.tsx";
 import { isEphemeralDatabase } from "../../lib/db.ts";
 import { requireAdmin } from "../../lib/session.ts";
 import { catalogueFor, listTenants } from "../../lib/tenants.ts";
-import { githubConfigured } from "../../lib/github.ts";
+import { githubConfigured, listRepos } from "../../lib/github.ts";
+import { tokenState } from "../../lib/github-credentials.ts";
+import { GithubConnectPanel } from "./GithubConnectPanel.tsx";
 import { TenantForm } from "./TenantForm.tsx";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,14 @@ export default async function TenantsPage() {
   const tenants = listTenants();
   const live = githubConfigured();
 
+  // Discovery is best-effort: without a token (or with a bad one) the panel still
+  // renders and explains itself rather than 500-ing the admin page.
+  const state = tokenState();
+  const connectedRepos = new Set(tenants.map((t) => t.github_repo.toLowerCase()).filter(Boolean));
+  const listed = live
+    ? await listRepos(connectedRepos)
+    : { ok: false, repos: [], error: undefined, source: state.state };
+
   return (
     <AppShell user={user} active="tenants" ephemeral={isEphemeralDatabase()}>
       <PageHead
@@ -21,9 +31,9 @@ export default async function TenantsPage() {
         subtitle="A tenant is a connected application, stored as data only. Adding one here is the whole integration on the hub side — the consuming repository needs no code, no CI and no deploy."
       >
         {live ? (
-          <span className="tag mint">GITHUB_TOKEN configured</span>
+          <span className="tag mint">publishing enabled</span>
         ) : (
-          <span className="tag amber">no GITHUB_TOKEN — publishing disabled</span>
+          <span className="tag amber">no token — publishing disabled</span>
         )}
       </PageHead>
 
@@ -72,7 +82,15 @@ export default async function TenantsPage() {
           })}
         </div>
 
-        <Card title="Add a tenant" sid="sec.tenants-new">
+        <GithubConnectPanel
+          tokenState={state.state}
+          tokenHint={state.hint}
+          repos={listed.repos}
+          listError={listed.error}
+          source={listed.source}
+        />
+
+        <Card title="Add a tenant manually" sid="sec.tenants-new">
           <p className="tiny dim" style={{ marginBottom: 12 }}>
             Paste the app&apos;s stable-ID catalogue (one <span className="mono">id | label | hint</span> per line, IDs
             like <span className="mono">tab.audits</span> or <span className="mono">sec.audit-log</span>) and a keyword

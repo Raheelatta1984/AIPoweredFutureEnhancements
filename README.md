@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (52 tests) |
+| `npm test` | `node:test` + `tsx` suite (68 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -231,6 +231,21 @@ tests/          node:test suites (rules, studio, auth, lifecycle, docs-sync, dep
 handovers/      published documents, mirrored per tenant (+ archived/)
 vault/          Markdown mirror of every proposal (+ archive/)
 ```
+
+## Connecting your projects
+
+An admin opens **/tenants** and finds two panels:
+
+1. **GitHub connection** — paste a token with `Contents: read and write` (fine-grained) or
+   `repo` (classic). It is verified against the API on save and encrypted at rest with a key
+   derived from `SESSION_SECRET`. `GITHUB_TOKEN` from the environment always takes precedence.
+2. **Your GitHub projects** — every repository the token can see, with visibility and last
+   push. Pick one and click **Connect as tenant**: it creates the tenant row (name, repo,
+   `docs/enhancements` handover folder) and nothing else. The consuming repository still needs
+   no code, no workflow and no deploy.
+
+Without a token the hub refuses every move to **Building** and says so — publishing is the
+gate, not a background nicety.
 
 ## Deploying
 

@@ -152,8 +152,9 @@ export async function publishHandover(
 ): Promise<PublishOutcome> {
   if (!githubConfigured()) {
     const error =
-      "Handover not published: GITHUB_TOKEN is not configured on the hub, so the document cannot reach " +
-      `${tenant.github_repo || "the consuming repo"}. The stage was NOT changed.`;
+      "Handover not published: no GitHub token is configured on the hub, so the document cannot reach " +
+      `${tenant.github_repo || "the consuming repo"}. An admin can paste one on /tenants (section "GitHub connection"). ` +
+      "The stage was NOT changed.";
     recordAudit({
       tenantId: tenant.id,
       actor,
@@ -164,7 +165,7 @@ export async function publishHandover(
     return { ok: false, error };
   }
   if (!tenant.github_repo) {
-    const error = `Tenant "${tenant.name}" has no github_repo configured, so there is nowhere to publish. Stage unchanged.`;
+    const error = `Tenant "${tenant.name}" has no github_repo configured, so there is nowhere to publish. Set the repository on /tenants. Stage unchanged.`;
     recordAudit({
       tenantId: tenant.id,
       actor,
