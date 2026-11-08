@@ -6,7 +6,14 @@
 
 import { resolveGithubToken } from "./github-credentials.ts";
 
-const API = "https://api.github.com";
+/**
+ * API base. `GITHUB_API_URL` makes this testable and adds GitHub Enterprise support
+ * (https://ghe.example.com/api/v3); it defaults to the public API.
+ */
+function apiBase(): string {
+  const configured = process.env.GITHUB_API_URL?.trim();
+  return (configured || "https://api.github.com").replace(/\/+$/, "");
+}
 
 export type GithubConfig = { token: string | null; repo: string; branch?: string };
 
@@ -64,7 +71,7 @@ export type RemoteDoc = { path: string; sha: string; htmlUrl?: string };
 
 async function getContent(config: GithubConfig & { token: string }, path: string, branch: string) {
   const { owner, name } = splitRepo(config.repo) ?? { owner: "", name: "" };
-  const url = `${API}/repos/${owner}/${name}/contents/${encodeURI(path)}?ref=${encodeURIComponent(branch)}`;
+  const url = `${apiBase()}/repos/${owner}/${name}/contents/${encodeURI(path)}?ref=${encodeURIComponent(branch)}`;
   const response = await fetch(url, { headers: authHeaders(config.token), cache: "no-store" });
   if (response.status === 404) return null;
   if (!response.ok) {
@@ -100,7 +107,7 @@ export async function publishDocument(
   const branch = config.branch || defaultBranch();
   try {
     const existing = await getContent({ ...config, token: config.token }, path, branch);
-    const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodeURI(path)}`;
+    const url = `${apiBase()}/repos/${repo.owner}/${repo.name}/contents/${encodeURI(path)}`;
     const body: Record<string, unknown> = {
       message,
       content: toBase64(content),
@@ -138,7 +145,7 @@ export async function listDocuments(
   if (!repo) return { ok: false, docs: [], error: `Invalid github_repo "${config.repo}".` };
   if (!config.token) return { ok: false, docs: [], error: "GITHUB_TOKEN is not configured on the hub." };
   try {
-    const url = `${API}/repos/${repo.owner}/${repo.name}/contents/${encodeURI(normaliseDir(dir))}?ref=${encodeURIComponent(branch)}`;
+    const url = `${apiBase()}/repos/${repo.owner}/${repo.name}/contents/${encodeURI(normaliseDir(dir))}?ref=${encodeURIComponent(branch)}`;
     const response = await fetch(url, { headers: authHeaders(config.token), cache: "no-store" });
     if (response.status === 404) return { ok: true, docs: [] };
     if (!response.ok) {
@@ -236,7 +243,9 @@ export async function listRepos(connectedRepos: ReadonlySet<string> = new Set())
   try {
     // 100 per page, capped at 10 pages: a hub needing more than 1000 repos is out of scope.
     for (let page = 1; page <= 10; page += 1) {
-      const response = await fetch(`${API}/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`, {
+      const response = await fetch(
+        `${apiBase()}/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`,
+        {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/vnd.github+json",
@@ -295,7 +304,7 @@ export async function verifyToken(): Promise<{ ok: boolean; login?: string; erro
   const token = githubToken();
   if (!token) return { ok: false, error: "No token configured." };
   try {
-    const response = await fetch(`${API}/user`, {
+    const response = await fetch(`${apiBase()}/user`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
@@ -310,4 +319,36 @@ export async function verifyToken(): Promise<{ ok: boolean; login?: string; erro
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Parses a pasted list of repositories ("owner/name", one per line or comma/space
+ * separated). Blank lines, comments and duplicates are dropped; anything malformed is
+ * reported rather than silently ignored, because a typo here creates a tenant that can
+ * never publish.
+ */
+export function parseRepoLines(
+  input: string,
+): { valid: string[]; invalid: string[] } {
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+  // Strip whole-line comments BEFORE splitting: otherwise "# note" contributes a word.
+  const cleaned = input
+    .split(/\r?\n/)
+    .map((line) => line.replace(/(^|\s)#.*$/, ""))
+    .join("\n");
+  for (const chunk of cleaned.split(/[\s,;]+/)) {
+    const candidate = chunk.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "");
+    if (!candidate) continue;
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(candidate)) {
+      if (!invalid.includes(candidate)) invalid.push(candidate);
+      continue;
+    }
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    valid.push(candidate);
+  }
+  return { valid, invalid };
 }

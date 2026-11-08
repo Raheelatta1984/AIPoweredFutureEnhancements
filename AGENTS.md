@@ -119,6 +119,16 @@ the reasoning; this file is the checklist.
     imports from `ui.tsx` breaks `next build` with `UnhandledSchemeError`. Server data
     + a small client child (`app/tenants/ActionForm.tsx`) is the pattern to copy.
 
+36. **Discovery must explain an empty list.** An empty repository list means a missing or
+    unsupported credential, not "you have no projects" — the panel says which, and that an
+    empty `GITHUB_TOKEN` env var beats a stored token. Never render a list with no reason.
+37. **Bulk connect validates before it writes.** Every pasted `owner/name` is checked against
+    the token's live repository list; unknown or malformed names are reported, never turned
+    into a tenant that cannot publish.
+38. **`GITHUB_API_URL` exists so this is testable.** `tests/publish.test.mts` runs a real local
+    HTTP server and asserts the exact request GitHub would receive (path, commit message,
+    document body). Point that variable at the stand-in; never mock `fetch` globally.
+
 ## Verification before you push
 
 ```bash
@@ -131,7 +141,8 @@ Test files: `rules` (pure helpers), `studio` (drafting engine), `auth` (scrypt, 
 revocation, tenant-access guard), `lifecycle` (submit → publish → archive → delete),
 `docs-sync` (repo reconciliation), `deploy` (seed idempotency, serverless paths, runtime
 warnings) and `github` (auth bootstrap ordering, cold-instance sign-in, partial-seed repair,
-token encryption/resolution, repo name handling). Files that use top-level await must be `.mts`, because
+token encryption/resolution, repo name handling), and `publish` (repo discovery, one-click
+and bulk connect, the published request, and refusal when the write fails). Files that use top-level await must be `.mts`, because
 tsx compiles a plain `.ts` to CJS and CJS rejects top-level await.
 
 Add a test for every behavioural change. If a rule above needs to change, update this file,

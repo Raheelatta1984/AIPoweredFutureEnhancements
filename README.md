@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (68 tests) |
+| `npm test` | `node:test` + `tsx` suite (76 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -214,6 +214,7 @@ See [`.env.example`](.env.example).
 | `GITHUB_TOKEN` | — | Contents API writes to the consuming repo |
 | `SEED_DEMO_DATA` | `true` | `false` = start with an empty hub |
 | `ENHANCEMENT_DOC_SYNC` | `true` | `false` = skip the boot-time doc sync |
+| `GITHUB_API_URL` | `https://api.github.com` | GitHub Enterprise / test stand-in |
 | `AI_PROVIDER` | `local` | documents that drafting is local; no provider is called |
 
 ---
@@ -239,10 +240,18 @@ An admin opens **/tenants** and finds two panels:
 1. **GitHub connection** — paste a token with `Contents: read and write` (fine-grained) or
    `repo` (classic). It is verified against the API on save and encrypted at rest with a key
    derived from `SESSION_SECRET`. `GITHUB_TOKEN` from the environment always takes precedence.
-2. **Your GitHub projects** — every repository the token can see, with visibility and last
-   push. Pick one and click **Connect as tenant**: it creates the tenant row (name, repo,
-   `docs/enhancements` handover folder) and nothing else. The consuming repository still needs
-   no code, no workflow and no deploy.
+2. **Your GitHub projects** — every repository the token can see, with visibility, archived
+   state, last push and whether it is already a tenant. Pick one and click **Connect as
+   tenant**, or paste several (`owner/name`, one per line) to connect them in one go. Each
+   name is checked against the token first, so a typo is reported instead of creating a
+   tenant that can never publish. Connecting creates the tenant row (name, repo,
+   `docs/enhancements` handover folder) and nothing else — the consuming repository still
+   needs no code, no workflow and no deploy.
+
+If the list is empty, the panel says why: no token in use, a token without the `repo` scope,
+or an empty `GITHUB_TOKEN` variable in your hosting settings overriding the stored one. On a
+serverless host a stored token lives in `/tmp`, so it is lost on the next cold start — set the
+environment variable for a lasting connection.
 
 Without a token the hub refuses every move to **Building** and says so — publishing is the
 gate, not a background nicety.

@@ -1,4 +1,4 @@
-import { connectRepoAction, saveGithubTokenAction } from "../actions/admin.ts";
+import { connectRepoAction, connectReposAction, saveGithubTokenAction } from "../actions/admin.ts";
 import type { GithubRepo } from "../../lib/github.ts";
 import { Notice } from "../../components/ui.tsx";
 import { ActionForm, SubmitButton } from "./ActionForm.tsx";
@@ -15,12 +15,14 @@ export function GithubConnectPanel({
   repos,
   listError,
   source,
+  ephemeral,
 }: {
   tokenState: "env" | "stored" | "none";
   tokenHint: string | null;
   repos: GithubRepo[];
   listError?: string;
   source: "env" | "stored" | "none";
+  ephemeral: boolean;
 }) {
   const connected = repos.filter((repo) => repo.connected);
   const available = repos.filter((repo) => !repo.connected);
@@ -82,6 +84,17 @@ export function GithubConnectPanel({
                 {tokenHint}
               </p>
             ) : null}
+            {ephemeral ? (
+              <div className="notice warn" role="alert">
+                <span className="icon">!</span>
+                <div>
+                  This hub runs on a serverless filesystem, so a token saved here lives in <span className="mono">/tmp</span>{" "}
+                  and is lost on the next cold start — you will have to paste it again. For a connection that survives,
+                  set <span className="mono">GITHUB_TOKEN</span> in your hosting settings instead (and make sure it is
+                  not an empty value, which overrides this form).
+                </div>
+              </div>
+            ) : null}
           </ActionForm>
         )}
       </section>
@@ -105,13 +118,23 @@ export function GithubConnectPanel({
 
         {listError ? <Notice tone="error">{listError}</Notice> : null}
 
+        {source === "none" && !listError ? (
+          <div className="notice warn" role="alert">
+            <span className="icon">!</span>
+            <div>
+              <strong>Your projects cannot appear yet: no token is in use.</strong> GitHub has no way to know which
+              repositories are yours without a credential, so this list stays empty until one works. Paste a token in
+              the panel above — it must include the <span className="mono">repo</span> scope (classic) or{" "}
+              <span className="mono">Contents: read</span> + <span className="mono">Metadata: read</span>{" "}
+              (fine-grained). If a token is already saved, an empty <span className="mono">GITHUB_TOKEN</span> variable
+              in your hosting settings overrides it — delete that variable.
+            </div>
+          </div>
+        ) : null}
+
         {repos.length === 0 ? (
-          listError ? null : (
-            <p className="small dim">
-              {source === "none"
-                ? "Connect a token above to list your repositories."
-                : "No repositories were returned for this token."}
-            </p>
+          listError ? null : source === "none" ? null : (
+            <p className="small dim">No repositories were returned for this token.</p>
           )
         ) : (
           <ActionForm action={connectRepoAction} className="stack" style={{ gap: 10 }}>
@@ -146,6 +169,43 @@ export function GithubConnectPanel({
             </div>
           </ActionForm>
         )}
+
+        {repos.length > 1 ? (
+          <details className="bulk-connect" style={{ marginTop: 12 }}>
+            <summary className="small" style={{ cursor: "pointer" }}>
+              Connect several projects at once ({available.length} not connected)
+            </summary>
+            <ActionForm action={connectReposAction} className="stack" style={{ gap: 10, marginTop: 10 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="gh-bulk">
+                  Repositories — one per line (<span className="mono">owner/name</span>)
+                </label>
+                <textarea
+                  id="gh-bulk"
+                  name="repos"
+                  rows={5}
+                  placeholder={available
+                    .slice(0, 3)
+                    .map((repo) => repo.fullName)
+                    .join("\n")}
+                />
+                <p className="tiny dim" style={{ margin: "4px 0 0" }}>
+                  Full GitHub URLs are accepted too. Each name is checked against your token before anything is
+                  created.
+                </p>
+              </div>
+              <div className="row tight">
+                <div className="field" style={{ marginBottom: 0, maxWidth: 260 }}>
+                  <label htmlFor="gh-bulk-dir">Handover folder</label>
+                  <input id="gh-bulk-dir" name="handover_dir" defaultValue="docs/enhancements" />
+                </div>
+                <SubmitButton className="btn-primary" pendingLabel="Connecting…">
+                  Connect listed projects
+                </SubmitButton>
+              </div>
+            </ActionForm>
+          </details>
+        ) : null}
 
         {repos.length > 0 ? (
           <div className="table-wrap" style={{ marginTop: 12 }}>
