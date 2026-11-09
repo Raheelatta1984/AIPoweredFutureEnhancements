@@ -15,8 +15,8 @@ import {
   type SessionFailure,
   type SessionPayload,
 } from "./rules.ts";
-import { getTenantById, visibleTenants } from "./tenants.ts";
-import type { Person, PublicPerson, SessionUser } from "./types.ts";
+import { parseTenantCookieValue, tenantIdFromCookieValue, visibleTenants } from "./tenants.ts";
+import type { Person, PublicPerson, SessionUser, TenantSelectionNotice } from "./types.ts";
 
 const scrypt = promisify(scryptCb) as (
   password: string | Buffer,
@@ -146,9 +146,23 @@ export function resolveSession(token: string | undefined | null, cookieTenantId:
   const tenants = visibleTenants(person);
   const switchers = canSwitchTenantRole(person.role, person.tenant_id);
   let tenantId: string | null = person.tenant_id;
+  let tenantNotice: TenantSelectionNotice | undefined;
+  let tenantNoticeSlug: string | null = null;
   if (switchers) {
-    const requested = cookieTenantId ? getTenantById(cookieTenantId) : null;
-    tenantId = requested?.id ?? tenants[0]?.id ?? null;
+    // The selection is `slug~id`: id first, slug second, so a rebuilt database
+    // (which renumbers every id) restores the same tenant by its durable slug.
+    const remembered = tenantIdFromCookieValue(cookieTenantId, tenants, person.id);
+    tenantId = remembered ?? tenants[0]?.id ?? null;
+    const parsed = parseTenantCookieValue(cookieTenantId);
+    // Only a selection made by *this* account counts as "lost"; another browser user's
+    // leftover is simply ignored, not reported.
+    const ownSelection = parsed && (!parsed.personId || parsed.personId === person.id);
+    if (ownSelection && !remembered) {
+      // A selection that cannot be honoured must be *reported*, never silently replaced:
+      // "the project I chose keeps reverting" is exactly what silence looks like.
+      tenantNotice = "rebuilt";
+      tenantNoticeSlug = parsed.slug;
+    }
   }
   const role: Role = isRole(person.role) ? person.role : "viewer";
   return {
@@ -160,6 +174,8 @@ export function resolveSession(token: string | undefined | null, cookieTenantId:
     canManage: canManageRole(role),
     canEdit: canEditRole(role),
     cookieTenantId: cookieTenantId,
+    tenantNotice,
+    tenantNoticeSlug,
   };
 }
 

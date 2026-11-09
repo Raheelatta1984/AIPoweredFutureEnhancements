@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 
 import { hashPassword, revokeAllForPerson } from "../../lib/auth.ts";
 import { recordAudit } from "../../lib/audit.ts";
-import { run } from "../../lib/db.ts";
+import { run, stableId } from "../../lib/db.ts";
 import { tenantSlugFrom } from "../../lib/enhancements.ts";
 import { isRole } from "../../lib/roles.ts";
 import { requireAdminAction } from "../../lib/session.ts";
@@ -73,7 +73,10 @@ export async function createTenantAction(_prev: AdminState, formData: FormData):
 
   const existingSlugs = listTenants().map((t) => t.slug);
   const slug = tenantSlugFrom(name, existingSlugs);
-  const id = randomUUID();
+  // Derived, not random: re-adding the same application (after a cold start wiped the
+  // instance that stored it) restores the *same id*, so a remembered selection and any
+  // bookmarked `/tenants` links keep pointing at it.
+  const id = stableId("tenant", slug);
   run(
     `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
@@ -345,7 +348,7 @@ export async function connectRepoAction(_prev: AdminState, formData: FormData): 
 
   const existingSlugs = tenants.map((t) => t.slug);
   const slug = tenantSlugFrom(name, existingSlugs);
-  const id = randomUUID();
+  const id = stableId("tenant", slug);
   run(
     `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
@@ -440,7 +443,7 @@ export async function connectReposAction(_prev: AdminState, formData: FormData):
       `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       [
-        randomUUID(),
+        stableId("tenant", slug),
         slug,
         name,
         repo.description ?? `Connected from ${repo.fullName}.`,
@@ -614,7 +617,7 @@ export async function connectAllVisibleReposAction(_prev: AdminState, formData: 
       `INSERT INTO tenants (id, slug, name, description, github_repo, handover_dir, areas_json, keyword_map_json, colour, enabled, sort_order, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       [
-        randomUUID(),
+        stableId("tenant", slug),
         slug,
         name,
         repo.description ?? `Connected from ${repo.fullName}.`,

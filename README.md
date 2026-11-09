@@ -41,7 +41,7 @@ is refused** with a visible error instead of silently pretending the document ex
 | `npm run dev` | `next dev -H 0.0.0.0 -p 3000` (runs `db:embed` first) |
 | `npm run build` | production build (runs `db:embed` first) |
 | `npm start` | serve the production build on `0.0.0.0:3000` |
-| `npm test` | `node:test` + `tsx` suite (99 tests) |
+| `npm test` | `node:test` + `tsx` suite (103 tests) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npm run db:embed` | bakes `db/migrations/*.sql` into `db/migrations.generated.ts` |
 | `npm run db:migrate` | applies migrations to `DATABASE_FILE` |
@@ -113,7 +113,8 @@ areas_json, keyword_map_json, colour, enabled, sort_order)` plus its own `depart
 
 * **Isolation is absolute.** Every read and every mutation is tenant-scoped; cross-tenant
   access is refused and covered by tests. Hub-level `admin`/`exec` people switch tenants
-  with the `feh_tenant` cookie.
+  with the `feh_tenant` cookie, which remembers the choice as `slug~id` and belongs to one
+  account — a tenant-bound person cannot be steered by it at all.
 * **The AI never sees another tenant's vocabulary.** The drafting engine is grounded only
   in the active tenant's areas, keyword map and catalogue.
 * **The consuming repo needs no code.** Adding a tenant in the admin UI is the entire hub
@@ -299,6 +300,13 @@ rendering. That state is not durable, and the top bar says so:
 | `dev session secret` | `SESSION_SECRET` missing/&lt;16 chars — cookies are signed with the public fallback |
 | `ephemeral /tmp` | no `DATABASE_FILE` on serverless — data resets on every cold start |
 | `publishing off` | no `GITHUB_TOKEN` — handover publishing cannot work, so stage moves are refused |
+
+**The tenant you pick stays picked.** A selection is remembered per account as
+`slug~id` and restored by slug when a cold start has reissued the ids, and tenant ids are
+derived from the slug (`stableId("tenant", slug)`), so re-adding the same application
+restores the same row. A switch returns you to the tab you switched from. If the remembered
+tenant is gone entirely, the hub says so under the page title instead of quietly showing a
+different application — nothing can restore a tenant that only ever existed in `/tmp`.
 
 Point `DATABASE_FILE`, `ENHANCEMENT_VAULT_DIR` and `ENHANCEMENT_HANDOVER_DIR` at persistent
 storage for real use. Verified end-to-end in serverless mode: build → `VERCEL=1 next start`
