@@ -18,6 +18,17 @@ export const NAV: Array<{ key: NavKey; href: string; label: string; sid: string;
   { key: "audit", href: "/audit", label: "Audit", sid: "tab.audit", minRole: "manager" },
 ];
 
+/**
+ * Where a tenant switch made on this tab should send the operator back to.
+ *
+ * Switching tenant used to always redirect to `/`, so pressing "switch to …" in the
+ * studio or the vault threw away the page you were reading. Derived from the stable ID
+ * the page already passes to `PageHead`, so no page has to remember to pass it.
+ */
+export function pathForSid(sid: string): string {
+  return NAV.find((item) => item.sid === sid)?.href ?? "/";
+}
+
 export function navFor(user: SessionUser) {
   return NAV.filter((item) => {
     if (item.minRole === "admin") return user.canAdmin;
@@ -64,6 +75,7 @@ export function TopBar({ user, active, ephemeral }: { user: SessionUser; active:
         <div className="topbar-right">
           {user.canSwitchTenant && user.tenants.length > 1 ? (
             <form action={switchTenantAction} className="row tight">
+              <input type="hidden" name="next" value={NAV.find((item) => item.key === active)?.href ?? "/"} />
               <select
                 name="tenant_id"
                 defaultValue={user.tenantId ?? ""}
@@ -113,9 +125,10 @@ export function TopBar({ user, active, ephemeral }: { user: SessionUser; active:
  * For hub-level accounts it also lists the other tenants as links, because a switcher you
  * have to find first reads as a missing tenant list.
  */
-export function TenantContext({ user }: { user: SessionUser }) {
+export function TenantContext({ user, next }: { user: SessionUser; next?: string }) {
   const active = user.tenants.find((t) => t.id === user.tenantId) ?? null;
   const others = user.tenants.filter((t) => t.id !== user.tenantId);
+  const back = next ?? "/";
   if (!active) {
     return (
       <div className="tenant-context" data-tenant-context="none">
@@ -140,7 +153,8 @@ export function TenantContext({ user }: { user: SessionUser }) {
           {others.map((tenant) => (
             <form key={tenant.id} action={switchTenantAction}>
               <input type="hidden" name="tenant_id" value={tenant.id} />
-              <button type="submit" className="tenant-chip" title={`Open ${tenant.name}`}>
+              <input type="hidden" name="next" value={back} />
+              <button type="submit" className="tenant-chip" title={`Open ${tenant.name} and stay on this tab`}>
                 {tenant.name}
               </button>
             </form>
@@ -149,6 +163,53 @@ export function TenantContext({ user }: { user: SessionUser }) {
       ) : (
         <span className="tiny dim">{user.canSwitchTenant ? "only tenant" : "your tenant"}</span>
       )}
+    </div>
+  );
+}
+
+/**
+ * "The tenant you picked could not be restored" — said out loud, where the tenant is named.
+ *
+ * A remembered selection points at a tenant id in a per-instance database. When that
+ * database is rebuilt the id is gone, and the hub used to fall back to the first tenant in
+ * silence, which reads as the project vanishing on every tab. This states what happened,
+ * keeps the reason recoverable (re-seed / re-connect), and offers the one-click way out.
+ */
+export function TenantNotice({ user, next }: { user: SessionUser; next?: string }) {
+  if (!user.tenantNotice) return null;
+  const back = next ?? "/tenants";
+  return (
+    <div className="tenant-context" data-tenant-notice="rebuilt">
+      <span className="sid">sec.tenant-context-notice</span>
+      <span className="tag amber">remembered tenant unavailable</span>
+      <span className="tiny dim">
+        {user.tenantNoticeSlug ? (
+          <>
+            This instance no longer has <span className="mono">{user.tenantNoticeSlug}</span> — a cold start rebuilt the
+            database, and tenants created in the browser live on that instance only.{" "}
+          </>
+        ) : (
+          <>This instance no longer has the tenant you were working in — a cold start rebuilt its database. </>
+        )}
+        Re-add or re-connect it on{" "}
+        <Link href="/tenants" prefetch={false}>
+          Tenants
+        </Link>
+        ; the tenant you are seeing now is the first one this account can open.
+      </span>
+      {user.tenants.length > 1
+        ? user.tenants
+            .filter((tenant) => tenant.id !== user.tenantId)
+            .map((tenant) => (
+              <form key={tenant.id} action={switchTenantAction}>
+                <input type="hidden" name="tenant_id" value={tenant.id} />
+                <input type="hidden" name="next" value={back} />
+                <button type="submit" className="tenant-chip">
+                  Open {tenant.name}
+                </button>
+              </form>
+            ))
+        : null}
     </div>
   );
 }
@@ -181,7 +242,8 @@ export function PageHead({
           <h1>{title}</h1>
           <StableId id={sid} />
         </div>
-        {user ? <TenantContext user={user} /> : null}
+        {user ? <TenantContext user={user} next={pathForSid(sid)} /> : null}
+        {user ? <TenantNotice user={user} next={pathForSid(sid)} /> : null}
         {subtitle ? <p className="sub">{subtitle}</p> : null}
       </div>
       <div className="spacer" />

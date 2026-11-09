@@ -311,3 +311,43 @@ Two traps worth recording:
 
 The regression test is structural on purpose: `tests/github.test.mts` asserts that every page
 passes `user` to `PageHead`, so a new tab cannot quietly lose the context again.
+
+## Why the chosen tenant kept "disappearing"
+
+*"I'm losing access to my project and all the project from all the tabs is disappearing. The
+project should remain selected after the switch all the time."*
+
+Two separate faults produced one symptom.
+
+1. **The selection cookie stored a bare id.** Every tenant is a row in the instance's SQLite
+   file — on a serverless host, `/tmp`, which starts empty on a cold start. A selection made in
+   the browser therefore pointed at an id that no longer existed, `resolveSession` found no
+   match, and it fell back to `tenants[0]`. Nothing was logged and nothing was shown: the hub
+   simply displayed a different application after every switch, which is exactly what "the
+   project disappears" looks like from the outside. The cookie now carries
+   `<person id>|<slug>~<id>` and resolution tries the id, then the slug. The slug is durable by
+   construction — seeded tenants are re-seeded under the same slug, and re-connecting a
+   repository derives it the same way — so the same application is restored even though its id
+   was reissued.
+2. **The tenant itself really was unstable.** Tenants created in the UI got `randomUUID()`, so
+   re-adding one after a cold start produced a *new* application with a new id. Ids are now
+   derived, `stableId("tenant", slug)`, matching what seeded rows already did.
+
+Three smaller things fell out of the same report:
+
+* **A switch always redirected to `/`.** Switching on Studio or in the Vault threw away the page
+  you were reading, which reads as losing your place. The form now carries the page's path
+  (`pathForSid`, derived from the stable ID `PageHead` already receives) and the action
+  redirects there — validated against protocol-relative and cross-host targets.
+* **Signing out wiped the preference.** It was deleted alongside the session cookie, so every
+  sign-in reset the tenant. The selection is bound to a person id instead, is kept across a
+  sign-out, and is ignored (not applied) when a different account signs in on that browser.
+* **Nothing was ever said.** A selection that cannot be restored now sets
+  `tenantNotice: "rebuilt"` and `TenantNotice` renders under the title: which tenant is missing,
+  why (the instance's database was rebuilt), and where to re-add it. Silence is what made a
+  data-lifecycle bug read as an authorisation bug.
+
+**This does not make tenants durable.** They still live on one instance's `/tmp`; a cold start
+still removes every tenant created in the browser. The honest fix for that is
+`DATABASE_FILE` on persistent storage (the top bar keeps warning `ephemeral /tmp`), and the hub
+now says what happened instead of losing the operator's selection in silence.

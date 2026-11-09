@@ -377,3 +377,24 @@ test("the tenant context names the active tenant and offers the others", () => {
   assert.match(shell, /user\.tenants\.length > 1/);
   assert.match(shell, /others\.map/);
 });
+
+/**
+ * "Switching tenant throws me off the page I was reading."
+ *
+ * Every switch form carries the path it was pressed on (`next`), so a switch re-renders
+ * the same tab in the new tenant. The action must also keep the value on this host and
+ * still remember the tenant (`slug~id`), or the choice is lost on the next rebuild.
+ */
+test("a tenant switch keeps you on the tab you switched from", () => {
+  const shell = readFileSync(new URL("../components/Shell.tsx", import.meta.url), "utf8");
+  assert.match(shell, /pathForSid/, "the destination is derived from the page's stable ID");
+  assert.match(shell, /name="next"/, "the forms submit the page they are on");
+  assert.match(shell, /data-tenant-notice="rebuilt"/, "a lost selection is reported where the tenant is named");
+
+  const action = readFileSync(new URL("../app/actions/auth.ts", import.meta.url), "utf8");
+  const body = action.slice(action.indexOf("export async function switchTenantAction"));
+  assert.match(body, /safeInternalPath/, "the redirect target is validated");
+  assert.match(body, /redirect\(back\)/, "and the operator returns to the page they were on");
+  assert.match(body, /tenantCookieValue/, "the selection is stored durably (slug~id)");
+  assert.match(body, /function safeInternalPath[\s\S]*startsWith\("\/"\)/, "only same-host paths are allowed");
+});

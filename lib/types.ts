@@ -94,6 +94,17 @@ export type Department = {
   sort_order: number;
 };
 
+/**
+ * Why the tenant someone picked is not the tenant they are looking at.
+ *
+ * Only switchers (hub-level exec/admin) can have a remembered selection at all, and they
+ * may read every tenant — so the one reachable failure is `"rebuilt"`: the remembered
+ * tenant is gone from this database because a cold start wiped the instance that stored
+ * it. Nothing can restore it, so the hub says so instead of pretending nothing happened.
+ * Tenant-bound people are never steered by the cookie, so isolation is untouched.
+ */
+export type TenantSelectionNotice = "rebuilt";
+
 export type SessionUser = {
   person: PublicPerson;
   tenantId: string | null; // active tenant (hub-level switcher result)
@@ -103,4 +114,8 @@ export type SessionUser = {
   canManage: boolean;
   canEdit: boolean;
   cookieTenantId: string | null;
+  /** Set when a stored selection could not be honoured, so the UI can explain it. */
+  tenantNotice?: TenantSelectionNotice;
+  /** The slug/name the abandoned selection pointed at, for the explanation only. */
+  tenantNoticeSlug?: string | null;
 };

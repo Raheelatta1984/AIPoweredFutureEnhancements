@@ -7,6 +7,7 @@
  * actually decides whether a request may touch a record.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
 
 import { makeTestEnv } from "./helpers.ts";
@@ -31,6 +32,7 @@ const {
 const { get, run } = await import("../lib/db.ts");
 const verifySessionModule = await import("../lib/rules.ts");
 const { signSession } = verifySessionModule;
+const tenantsModule = await import("../lib/tenants.ts");
 
 /** Creates a tenant row plus an optional person, returning their ids. */
 function seedTenant(slug: string, name: string): string {
@@ -222,6 +224,88 @@ test("tenant switching is hub-level only and falls back safely", () => {
   const editor = resolveSession(issueSession(qaEditor).token, northwindTenant)!;
   assert.equal(editor.tenantId, qaTenant);
   assert.equal(editor.tenants.length, 1);
+});
+
+/**
+ * "The project I switched to keeps disappearing."
+ *
+ * The remembered tenant lives in a cookie, but the tenant itself is a row in a
+ * per-instance `/tmp` database. The selection must therefore survive a rebuild (restored
+ * by slug once ids are reissued), and a selection that genuinely cannot be restored must
+ * be reported instead of silently replaced by whatever sorts first.
+ */
+test("a remembered tenant survives a database rebuild (the id changes, the slug does not)", () => {
+  const { tenantCookieValue, tenantIdFromCookieValue, listTenants } = tenantsModule;
+  const cookie = tenantCookieValue(hubAdmin, { slug: "northwind", id: northwindTenant });
+
+  const fresh = resolveSession(issueSession(hubAdmin).token, cookie)!;
+  assert.equal(fresh.tenantId, northwindTenant, "the exact id wins while it still exists");
+  assert.equal(fresh.tenantNotice, undefined, "a clean restore says nothing");
+
+  // Cold start: the same applications come back with reissued ids.
+  run("UPDATE tenants SET id = ? WHERE id = ?", ["rebuilt-northwind", northwindTenant]);
+  try {
+    const tenants = listTenants().map((tenant) => ({ ...tenant }));
+    assert.equal(
+      tenantIdFromCookieValue(cookie, tenants, hubAdmin),
+      "rebuilt-northwind",
+      "the slug restores the same application once its id is gone",
+    );
+    const afterRebuild = resolveSession(issueSession(hubAdmin).token, cookie)!;
+    assert.equal(afterRebuild.tenantId, "rebuilt-northwind", "the session follows the slug, not the dead id");
+    assert.equal(afterRebuild.tenantNotice, undefined, "restoring by slug is not a failure");
+  } finally {
+    run("UPDATE tenants SET id = ? WHERE id = ?", [northwindTenant, "rebuilt-northwind"]);
+  }
+});
+
+test("a tenant that cannot be restored is reported, not silently swapped", () => {
+  const { tenantCookieValue } = tenantsModule;
+
+  // Gone for good: neither the id nor the slug matches anything here.
+  const vanished = resolveSession(
+    issueSession(hubAdmin).token,
+    tenantCookieValue(hubAdmin, { slug: "deleted-app", id: "no-such-id" }),
+  )!;
+  assert.equal(vanished.tenantId, qaTenant, "it still lands on a tenant this account can read");
+  assert.equal(vanished.tenantNotice, "rebuilt", "and says the remembered tenant is gone");
+  assert.equal(vanished.tenantNoticeSlug, "deleted-app", "naming what was lost");
+
+  // Browsers percent-encode the separators, and some cookie jars quote the value.
+  const encoded = tenantsModule.parseTenantCookieValue("person-x%7Cnorthwind~abc")!;
+  assert.equal(encoded.personId, "person-x", "a percent-encoded separator still parses");
+  assert.equal(encoded.slug, "northwind");
+  assert.equal(encoded.id, "abc");
+  assert.equal(tenantsModule.parseTenantCookieValue('"slug~id"')!.slug, "slug", "a quoted value still parses");
+  assert.equal(tenantsModule.parseTenantCookieValue("%7B")?.id, "{", "a malformed escape does not throw");
+
+  // Cookies written before this change (bare id) must keep working.
+  assert.equal(resolveSession(issueSession(hubAdmin).token, northwindTenant)!.tenantId, northwindTenant);
+
+  // Another account's leftover on a shared browser is ignored in silence, never applied.
+  const foreign = resolveSession(
+    issueSession(hubAdmin).token,
+    tenantCookieValue("person-someone-else", { slug: "northwind", id: northwindTenant }),
+  )!;
+  assert.equal(foreign.tenantId, qaTenant, "a colleague's tenant is not inherited");
+  assert.equal(foreign.tenantNotice, undefined, "and it is not reported as lost either");
+
+  // Isolation is unchanged: a tenant-bound person is never steered by the cookie.
+  const editor = resolveSession(issueSession(qaEditor).token, tenantCookieValue(qaEditor, { slug: "northwind", id: northwindTenant }))!;
+  assert.equal(editor.tenantId, qaTenant);
+  assert.equal(editor.tenants.length, 1);
+  assert.equal(editor.tenantNotice, undefined, "their own tenant cannot be 'lost' this way");
+});
+
+/** Re-adding an application must restore the same id, or a selection can never stick. */
+test("tenant ids are derived from the slug, so re-adding restores the same tenant", () => {
+  const source = readFileSync(new URL("../app/actions/admin.ts", import.meta.url), "utf8");
+  const create = source.slice(
+    source.indexOf("export async function createTenantAction"),
+    source.indexOf("export async function updateTenantAction"),
+  );
+  assert.doesNotMatch(create, /randomUUID\(\)/, "createTenantAction must not invent a new id for a known slug");
+  assert.match(create, /stableId\("tenant", slug\)/, "the id is derived from the slug");
 });
 
 test("assertTenantAccess refuses cross-tenant work", () => {

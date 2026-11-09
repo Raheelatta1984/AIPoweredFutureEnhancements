@@ -166,6 +166,23 @@ the reasoning; this file is the checklist.
     a page under `AppShell` without passing `user` to `PageHead`; `tests/github.test.mts`
     fails if one forgets. A tenant-bound account is never offered another tenant.
 
+44. **The tenant you chose stays chosen.** A selection is stored in `feh_tenant` as
+    `<person id>|<slug>~<id>` (`tenantCookieValue`) and resolved id-first, slug-second
+    (`tenantIdFromCookieValue`), because every tenant is a row in a per-instance database:
+    a rebuild reissues ids, and matching on the id alone silently snapped back to the first
+    tenant — the "project keeps disappearing" report. The person prefix means a shared
+    browser never inherits a colleague's tenant, and signing out keeps the preference (it
+    is discarded when a different account signs in). Never write a bare id again, and never
+    create a tenant with `randomUUID()`: ids come from `stableId("tenant", slug)` so
+    re-adding an application after a cold start restores the *same* id. A selection that
+    truly cannot be restored sets `tenantNotice = "rebuilt"`, which `TenantNotice` renders
+    under the title — silence is what turned a data-loss bug into a mystery.
+
+45. **A switch returns to the page that switched.** `switchTenantAction` redirects to the
+    validated `next` field itself (`safeInternalPath`: same-host paths only), which the
+    shell fills from `pathForSid(sid)`; before that every switch dropped the operator on
+    the Overview. There is exactly one way to change tenant, and it is this action.
+
 ## Verification before you push
 
 ```bash
